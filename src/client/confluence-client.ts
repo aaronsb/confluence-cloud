@@ -170,8 +170,18 @@ export class ConfluenceRestClient implements ConfluenceClient {
   }
 
   async getAncestors(pageId: string): Promise<Page[]> {
-    const raw = await this.request<{ results: ConfluenceV2Page[] }>(`/pages/${pageId}/ancestors`);
-    return raw.results.map(mapPage);
+    const raw = await this.request<{ results: Array<{ id: string; type: string }> }>(`/pages/${pageId}/ancestors`);
+    // v2 ancestors returns only IDs — fetch each page for details
+    const pages: Page[] = [];
+    for (const ancestor of raw.results) {
+      try {
+        const page = await this.getPage(ancestor.id);
+        pages.push(page);
+      } catch {
+        // Ancestor may be inaccessible
+      }
+    }
+    return pages;
   }
 
   // ── Spaces ─────────────────────────────────────────────────
