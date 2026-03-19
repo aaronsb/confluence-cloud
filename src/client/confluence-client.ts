@@ -48,10 +48,12 @@ export interface ConfluenceClient {
 
 export class ConfluenceRestClient implements ConfluenceClient {
   private baseUrl: string;
+  private baseUrlV1: string;
   private headers: Record<string, string>;
 
   constructor(config: ConfluenceConfig) {
     this.baseUrl = `${config.host}/wiki/api/v2`;
+    this.baseUrlV1 = `${config.host}/wiki/rest/api`;
     this.headers = {
       'Authorization': `Basic ${Buffer.from(`${config.email}:${config.apiToken}`).toString('base64')}`,
       'Content-Type': 'application/json',
@@ -61,6 +63,22 @@ export class ConfluenceRestClient implements ConfluenceClient {
 
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
     const url = `${this.baseUrl}${path}`;
+    const response = await fetch(url, {
+      ...options,
+      headers: { ...this.headers, ...options?.headers },
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Confluence API error ${response.status}: ${body}`);
+    }
+
+    if (response.status === 204) return undefined as T;
+    return response.json() as Promise<T>;
+  }
+
+  private async requestV1<T>(path: string, options?: RequestInit): Promise<T> {
+    const url = `${this.baseUrlV1}${path}`;
     const response = await fetch(url, {
       ...options,
       headers: { ...this.headers, ...options?.headers },
@@ -171,17 +189,16 @@ export class ConfluenceRestClient implements ConfluenceClient {
   // ── Search ─────────────────────────────────────────────────
 
   async searchByCql(cql: string, options?: PaginationOptions): Promise<SearchResult> {
+    // CQL search is a v1 API endpoint
     const params = new URLSearchParams({ cql });
     if (options?.cursor) params.set('cursor', options.cursor);
     if (options?.limit) params.set('limit', String(options.limit));
-    const raw = await this.request<ConfluenceV2SearchResponse>(
+    const raw = await this.requestV1<ConfluenceV1SearchResponse>(
       `/search?${params.toString()}`
     );
-    // Note: v2 search endpoint is at /wiki/rest/api/search (v1), not /wiki/api/v2
-    // May need to adjust the base URL for search specifically
     return {
       results: (raw.results ?? []).map(r => ({
-        content: mapPage(r.content),
+        content: mapV1Content(r.content),
         excerpt: r.excerpt,
         lastModified: r.lastModified ?? '',
         url: r.url ?? '',
@@ -295,6 +312,28 @@ interface ConfluenceV2SearchResponse {
   _links?: { next?: string };
 }
 
+// v1 search response has different content shape
+interface ConfluenceV1SearchResponse {
+  results: Array<{
+    content: ConfluenceV1Content;
+    excerpt?: string;
+    lastModified?: string;
+    url?: string;
+  }>;
+  totalSize?: number;
+  _links?: { next?: string };
+}
+
+interface ConfluenceV1Content {
+  id: string;
+  title: string;
+  type: string;
+  status: string;
+  _expandable?: Record<string, string>;
+  space?: { key: string; id: number };
+  version?: { number: number; when: string; by?: { displayName: string } };
+}
+
 // ── Mappers ────────────────────────────────────────────────────
 
 function mapPage(raw: ConfluenceV2Page): Page {
@@ -345,6 +384,23 @@ function mapAttachment(raw: ConfluenceV2Attachment): Attachment {
     pageId: r.pageId ?? '',
     version: r.version?.number ?? 1,
     createdAt: r.createdAt ?? '',
+  };
+}
+
+function mapV1Content(raw: ConfluenceV1Content): Page {
+  return {
+    id: raw.id,
+    title: raw.title,
+    spaceId: raw.space?.id?.toString() ?? '',
+    spaceKey: raw.space?.key,
+    status: (raw.status as Page['status']) ?? 'current',
+    version: {
+      number: raw.version?.number ?? 1,
+      createdAt: raw.version?.when ?? '',
+      authorId: raw.version?.by?.displayName ?? '',
+    },
+    createdAt: raw.version?.when ?? '',
+    authorId: raw.version?.by?.displayName ?? '',
   };
 }
 
