@@ -46,6 +46,10 @@ export interface ConfluenceClient {
 
 // ── REST v2 Implementation ─────────────────────────────────────
 
+import { MAX_RETRIES, sleep, parseRetryAfter, isRetryable } from './retry-utils.js';
+
+// ── Client ────────────────────────────────────────────────────
+
 export class ConfluenceRestClient implements ConfluenceClient {
   private baseUrl: string;
   private baseUrlV1: string;
@@ -62,27 +66,31 @@ export class ConfluenceRestClient implements ConfluenceClient {
   }
 
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
-    const response = await fetch(url, {
-      ...options,
-      headers: { ...this.headers, ...options?.headers },
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Confluence API error ${response.status}: ${body}`);
-    }
-
-    if (response.status === 204) return undefined as T;
-    return response.json() as Promise<T>;
+    return this.fetchWithRetry<T>(`${this.baseUrl}${path}`, options);
   }
 
   private async requestV1<T>(path: string, options?: RequestInit): Promise<T> {
-    const url = `${this.baseUrlV1}${path}`;
+    return this.fetchWithRetry<T>(`${this.baseUrlV1}${path}`, options);
+  }
+
+  /**
+   * Fetch with exponential backoff on 429 (rate limit) and 5xx (server errors).
+   * Respects Retry-After header when present.
+   */
+  private async fetchWithRetry<T>(url: string, options?: RequestInit, attempt = 0): Promise<T> {
     const response = await fetch(url, {
       ...options,
       headers: { ...this.headers, ...options?.headers },
     });
+
+    // Retryable status — backoff with jitter, respect Retry-After
+    if (isRetryable(response.status) && attempt < MAX_RETRIES) {
+      const delayMs = parseRetryAfter(response.headers.get('Retry-After'), attempt);
+      console.error(`[confluence-cloud] HTTP ${response.status}. Retrying in ${Math.round(delayMs)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await response.text(); // drain body to release socket
+      await sleep(delayMs);
+      return this.fetchWithRetry<T>(url, options, attempt + 1);
+    }
 
     if (!response.ok) {
       const body = await response.text();

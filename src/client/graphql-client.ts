@@ -3,6 +3,8 @@
  * See ADR-200: Hybrid REST and GraphQL Client.
  */
 
+import { MAX_RETRIES, sleep, parseRetryAfter, isRetryable } from './retry-utils.js';
+
 const AGG_ENDPOINT = 'https://api.atlassian.com/graphql';
 
 function buildAuthHeader(email: string, apiToken: string): string {
@@ -71,6 +73,14 @@ export class GraphQLClient {
     queryText: string,
     variables: Record<string, unknown> = {},
   ): Promise<{ success: boolean; data?: T; error?: string }> {
+    return this.queryWithRetry<T>(queryText, variables, 0);
+  }
+
+  private async queryWithRetry<T>(
+    queryText: string,
+    variables: Record<string, unknown>,
+    attempt: number,
+  ): Promise<{ success: boolean; data?: T; error?: string }> {
     try {
       const response = await fetch(AGG_ENDPOINT, {
         method: 'POST',
@@ -81,6 +91,14 @@ export class GraphQLClient {
         },
         body: JSON.stringify({ query: queryText, variables }),
       });
+
+      if (isRetryable(response.status) && attempt < MAX_RETRIES) {
+        const delayMs = parseRetryAfter(response.headers.get('Retry-After'), attempt);
+        console.error(`[confluence-cloud] GraphQL ${response.status}. Retrying in ${Math.round(delayMs)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await response.text(); // drain body to release socket
+        await sleep(delayMs);
+        return this.queryWithRetry<T>(queryText, variables, attempt + 1);
+      }
 
       if (!response.ok) {
         return { success: false, error: `HTTP ${response.status}` };
