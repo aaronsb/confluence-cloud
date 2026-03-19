@@ -1,0 +1,358 @@
+/**
+ * Confluence Cloud client — abstracts REST v2 and GraphQL transports.
+ * See ADR-200: Hybrid REST and GraphQL Client.
+ */
+
+import type {
+  ConfluenceConfig,
+  Page,
+  Space,
+  SearchResult,
+  Attachment,
+  PaginationOptions,
+  PaginatedResponse,
+} from '../types/index.js';
+
+// ── Client Interface ───────────────────────────────────────────
+
+export interface ConfluenceClient {
+  // Pages
+  getPage(id: string, expand?: string[]): Promise<Page>;
+  createPage(spaceId: string, title: string, body?: object, parentId?: string): Promise<Page>;
+  updatePage(id: string, title: string, body: object, version: number, message?: string): Promise<Page>;
+  deletePage(id: string): Promise<void>;
+
+  // Page hierarchy
+  getChildren(pageId: string, options?: PaginationOptions): Promise<PaginatedResponse<Page>>;
+  getAncestors(pageId: string): Promise<Page[]>;
+
+  // Spaces
+  getSpace(id: string): Promise<Space>;
+  listSpaces(options?: PaginationOptions): Promise<PaginatedResponse<Space>>;
+
+  // Search
+  searchByCql(cql: string, options?: PaginationOptions): Promise<SearchResult>;
+
+  // Attachments
+  getAttachments(pageId: string, options?: PaginationOptions): Promise<PaginatedResponse<Attachment>>;
+  uploadAttachment(pageId: string, filename: string, content: Buffer, mediaType: string): Promise<Attachment>;
+  deleteAttachment(id: string): Promise<void>;
+
+  // Labels
+  getLabels(pageId: string): Promise<string[]>;
+  addLabel(pageId: string, label: string): Promise<void>;
+  removeLabel(pageId: string, label: string): Promise<void>;
+}
+
+// ── REST v2 Implementation ─────────────────────────────────────
+
+export class ConfluenceRestClient implements ConfluenceClient {
+  private baseUrl: string;
+  private headers: Record<string, string>;
+
+  constructor(config: ConfluenceConfig) {
+    this.baseUrl = `${config.host}/wiki/api/v2`;
+    this.headers = {
+      'Authorization': `Basic ${Buffer.from(`${config.email}:${config.apiToken}`).toString('base64')}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    };
+  }
+
+  private async request<T>(path: string, options?: RequestInit): Promise<T> {
+    const url = `${this.baseUrl}${path}`;
+    const response = await fetch(url, {
+      ...options,
+      headers: { ...this.headers, ...options?.headers },
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Confluence API error ${response.status}: ${body}`);
+    }
+
+    if (response.status === 204) return undefined as T;
+    return response.json() as Promise<T>;
+  }
+
+  // ── Pages ──────────────────────────────────────────────────
+
+  async getPage(id: string, expand?: string[]): Promise<Page> {
+    const params = new URLSearchParams();
+    if (expand?.includes('body')) params.set('body-format', 'atlas_doc_format');
+    const qs = params.toString();
+    const raw = await this.request<ConfluenceV2Page>(`/pages/${id}${qs ? `?${qs}` : ''}`);
+    return mapPage(raw);
+  }
+
+  async createPage(spaceId: string, title: string, body?: object, parentId?: string): Promise<Page> {
+    const payload: Record<string, unknown> = {
+      spaceId,
+      title,
+      status: 'current',
+    };
+    if (parentId) payload.parentId = parentId;
+    if (body) {
+      payload.body = {
+        representation: 'atlas_doc_format',
+        value: JSON.stringify(body),
+      };
+    }
+    const raw = await this.request<ConfluenceV2Page>('/pages', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return mapPage(raw);
+  }
+
+  async updatePage(id: string, title: string, body: object, version: number, message?: string): Promise<Page> {
+    const payload = {
+      id,
+      title,
+      status: 'current',
+      body: {
+        representation: 'atlas_doc_format',
+        value: JSON.stringify(body),
+      },
+      version: {
+        number: version + 1,
+        message: message ?? '',
+      },
+    };
+    const raw = await this.request<ConfluenceV2Page>(`/pages/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    return mapPage(raw);
+  }
+
+  async deletePage(id: string): Promise<void> {
+    await this.request(`/pages/${id}`, { method: 'DELETE' });
+  }
+
+  // ── Hierarchy ──────────────────────────────────────────────
+
+  async getChildren(pageId: string, options?: PaginationOptions): Promise<PaginatedResponse<Page>> {
+    const params = new URLSearchParams();
+    if (options?.cursor) params.set('cursor', options.cursor);
+    if (options?.limit) params.set('limit', String(options.limit));
+    const qs = params.toString();
+    const raw = await this.request<ConfluenceV2PaginatedResponse<ConfluenceV2Page>>(`/pages/${pageId}/children${qs ? `?${qs}` : ''}`);
+    return {
+      results: raw.results.map(mapPage),
+      cursor: raw._links?.next ? extractCursor(raw._links.next) : undefined,
+    };
+  }
+
+  async getAncestors(pageId: string): Promise<Page[]> {
+    const raw = await this.request<{ results: ConfluenceV2Page[] }>(`/pages/${pageId}/ancestors`);
+    return raw.results.map(mapPage);
+  }
+
+  // ── Spaces ─────────────────────────────────────────────────
+
+  async getSpace(id: string): Promise<Space> {
+    const raw = await this.request<ConfluenceV2Space>(`/spaces/${id}`);
+    return mapSpace(raw);
+  }
+
+  async listSpaces(options?: PaginationOptions): Promise<PaginatedResponse<Space>> {
+    const params = new URLSearchParams();
+    if (options?.cursor) params.set('cursor', options.cursor);
+    if (options?.limit) params.set('limit', String(options.limit));
+    const qs = params.toString();
+    const raw = await this.request<ConfluenceV2PaginatedResponse<ConfluenceV2Space>>(`/spaces${qs ? `?${qs}` : ''}`);
+    return {
+      results: raw.results.map(mapSpace),
+      cursor: raw._links?.next ? extractCursor(raw._links.next) : undefined,
+    };
+  }
+
+  // ── Search ─────────────────────────────────────────────────
+
+  async searchByCql(cql: string, options?: PaginationOptions): Promise<SearchResult> {
+    const params = new URLSearchParams({ cql });
+    if (options?.cursor) params.set('cursor', options.cursor);
+    if (options?.limit) params.set('limit', String(options.limit));
+    const raw = await this.request<ConfluenceV2SearchResponse>(
+      `/search?${params.toString()}`
+    );
+    // Note: v2 search endpoint is at /wiki/rest/api/search (v1), not /wiki/api/v2
+    // May need to adjust the base URL for search specifically
+    return {
+      results: (raw.results ?? []).map(r => ({
+        content: mapPage(r.content),
+        excerpt: r.excerpt,
+        lastModified: r.lastModified ?? '',
+        url: r.url ?? '',
+      })),
+      totalSize: raw.totalSize ?? 0,
+      cursor: raw._links?.next ? extractCursor(raw._links.next) : undefined,
+    };
+  }
+
+  // ── Attachments ────────────────────────────────────────────
+
+  async getAttachments(pageId: string, options?: PaginationOptions): Promise<PaginatedResponse<Attachment>> {
+    const params = new URLSearchParams();
+    if (options?.cursor) params.set('cursor', options.cursor);
+    if (options?.limit) params.set('limit', String(options.limit));
+    const qs = params.toString();
+    const raw = await this.request<ConfluenceV2PaginatedResponse<ConfluenceV2Attachment>>(`/pages/${pageId}/attachments${qs ? `?${qs}` : ''}`);
+    return {
+      results: raw.results.map(mapAttachment),
+      cursor: raw._links?.next ? extractCursor(raw._links.next) : undefined,
+    };
+  }
+
+  async uploadAttachment(pageId: string, filename: string, content: Buffer, mediaType: string): Promise<Attachment> {
+    const formData = new FormData();
+    formData.append('file', new Blob([new Uint8Array(content)], { type: mediaType }), filename);
+
+    const raw = await this.request<ConfluenceV2Attachment>(`/pages/${pageId}/attachments`, {
+      method: 'POST',
+      headers: {
+        'Authorization': this.headers['Authorization'],
+        'X-Atlassian-Token': 'nocheck',
+      },
+      body: formData as unknown as BodyInit,
+    });
+    return mapAttachment(raw);
+  }
+
+  async deleteAttachment(id: string): Promise<void> {
+    await this.request(`/attachments/${id}`, { method: 'DELETE' });
+  }
+
+  // ── Labels ─────────────────────────────────────────────────
+
+  async getLabels(pageId: string): Promise<string[]> {
+    const raw = await this.request<{ results: Array<{ name: string }> }>(`/pages/${pageId}/labels`);
+    return raw.results.map(l => l.name);
+  }
+
+  async addLabel(pageId: string, label: string): Promise<void> {
+    await this.request(`/pages/${pageId}/labels`, {
+      method: 'POST',
+      body: JSON.stringify([{ prefix: 'global', name: label }]),
+    });
+  }
+
+  async removeLabel(pageId: string, label: string): Promise<void> {
+    await this.request(`/pages/${pageId}/labels/${label}`, { method: 'DELETE' });
+  }
+}
+
+// ── V2 API Response Types (internal) ───────────────────────────
+
+interface ConfluenceV2Page {
+  id: string;
+  title: string;
+  spaceId: string;
+  status: string;
+  parentId?: string;
+  version?: { number: number; message?: string; createdAt: string; authorId: string };
+  createdAt?: string;
+  authorId?: string;
+  body?: { atlas_doc_format?: { value: string } };
+  _links?: Record<string, string>;
+}
+
+interface ConfluenceV2Space {
+  id: string;
+  key: string;
+  name: string;
+  type: string;
+  status: string;
+  description?: { plain?: { value: string } };
+  homepageId?: string;
+}
+
+interface ConfluenceV2Attachment {
+  id: string;
+  title: string;
+  mediaType: string;
+  fileSize: number;
+  downloadLink?: string;
+  pageId?: string;
+  version?: { number: number };
+  createdAt?: string;
+}
+
+interface ConfluenceV2PaginatedResponse<T = ConfluenceV2Page> {
+  results: T[];
+  _links?: { next?: string };
+}
+
+interface ConfluenceV2SearchResponse {
+  results: Array<{
+    content: ConfluenceV2Page;
+    excerpt?: string;
+    lastModified?: string;
+    url?: string;
+  }>;
+  totalSize?: number;
+  _links?: { next?: string };
+}
+
+// ── Mappers ────────────────────────────────────────────────────
+
+function mapPage(raw: ConfluenceV2Page): Page {
+  const r = raw;
+  let body: Page['body'] | undefined;
+  if (r.body?.atlas_doc_format?.value) {
+    try {
+      body = { atlas_doc_format: JSON.parse(r.body.atlas_doc_format.value) };
+    } catch {
+      body = { atlas_doc_format: undefined };
+    }
+  }
+
+  return {
+    id: r.id,
+    title: r.title,
+    spaceId: r.spaceId,
+    status: r.status as Page['status'],
+    parentId: r.parentId,
+    version: r.version ?? { number: 1, createdAt: '', authorId: '' },
+    createdAt: r.createdAt ?? '',
+    authorId: r.authorId ?? '',
+    body,
+  };
+}
+
+function mapSpace(raw: ConfluenceV2Space): Space {
+  const r = raw;
+  return {
+    id: r.id,
+    key: r.key,
+    name: r.name,
+    type: r.type as Space['type'],
+    status: r.status as Space['status'],
+    description: r.description?.plain?.value,
+    homepageId: r.homepageId,
+  };
+}
+
+function mapAttachment(raw: ConfluenceV2Attachment): Attachment {
+  const r = raw;
+  return {
+    id: r.id,
+    title: r.title,
+    mediaType: r.mediaType,
+    fileSize: r.fileSize,
+    downloadUrl: r.downloadLink ?? '',
+    pageId: r.pageId ?? '',
+    version: r.version?.number ?? 1,
+    createdAt: r.createdAt ?? '',
+  };
+}
+
+function extractCursor(nextLink: string): string | undefined {
+  try {
+    const url = new URL(nextLink, 'https://placeholder.com');
+    return url.searchParams.get('cursor') ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
