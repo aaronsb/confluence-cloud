@@ -85,7 +85,8 @@ function renderList(items: ListItem[], ordered: boolean, depth: number): string 
     const marker = ordered ? `${i + 1}.` : '-';
     let result = `${indent}${marker} ${item.text}`;
     if (item.children && item.children.length > 0) {
-      result += '\n' + renderList(item.children.map(c => ({ text: c.text })), ordered, depth + 1);
+      const childOrdered = item.childrenOrdered ?? ordered;
+      result += '\n' + renderList(item.children.map(c => ({ text: c.text })), childOrdered, depth + 1);
     }
     return result;
   }).join('\n');

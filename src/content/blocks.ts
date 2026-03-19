@@ -74,6 +74,7 @@ export interface ListBlock {
 export interface ListItem {
   text: string;
   children?: ListItem[];
+  childrenOrdered?: boolean;
 }
 
 export interface RawAdfBlock {

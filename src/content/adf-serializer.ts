@@ -218,7 +218,7 @@ function serializeListItem(item: ListItem): AdfNode {
 
   if (item.children && item.children.length > 0) {
     content.push({
-      type: 'bulletList',
+      type: item.childrenOrdered ? 'orderedList' : 'bulletList',
       content: item.children.map(child => serializeListItem({ text: child.text })),
     });
   }

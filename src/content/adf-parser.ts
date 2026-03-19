@@ -200,12 +200,14 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
     return { type: 'list', ordered, items, id: nextId() };
   }
 
-  function parseListItem(node: AdfNode): { text: string; children?: { text: string }[] } {
+  function parseListItem(node: AdfNode): { text: string; children?: { text: string }[]; childrenOrdered?: boolean } {
     const textParts: string[] = [];
     const children: { text: string }[] = [];
+    let childrenOrdered: boolean | undefined;
 
     for (const child of node.content ?? []) {
       if (child.type === 'bulletList' || child.type === 'orderedList') {
+        childrenOrdered = child.type === 'orderedList';
         for (const subItem of child.content ?? []) {
           children.push({ text: extractText(subItem) });
         }
@@ -217,6 +219,7 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
     return {
       text: textParts.join('\n'),
       children: children.length > 0 ? children : undefined,
+      childrenOrdered,
     };
   }
 
