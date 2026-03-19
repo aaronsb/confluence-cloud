@@ -1,0 +1,98 @@
+{
+  "manifest_version": "0.3",
+  "name": "confluence-cloud-mcp",
+  "display_name": "Confluence Cloud",
+  "version": "0.1.0",
+  "description": "Structured page editing, macro support, graph navigation, and session-based content management for Confluence Cloud",
+  "author": {
+    "name": "aaronsb",
+    "url": "https://github.com/aaronsb"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aaronsb/confluence-cloud.git"
+  },
+  "homepage": "https://github.com/aaronsb/confluence-cloud#readme",
+  "support": "https://github.com/aaronsb/confluence-cloud/issues",
+  "license": "MIT",
+  "keywords": [
+    "confluence",
+    "atlassian",
+    "wiki",
+    "content-management",
+    "knowledge-base"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.js"
+      ],
+      "env": {
+        "CONFLUENCE_API_TOKEN": "${user_config.confluence_api_token}",
+        "CONFLUENCE_EMAIL": "${user_config.confluence_email}",
+        "CONFLUENCE_HOST": "${user_config.confluence_host}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "manage_confluence_page",
+      "description": "Get, create, update, delete, move, copy, or pull pages for editing"
+    },
+    {
+      "name": "edit_confluence_content",
+      "description": "Structural content editing within an active editing session"
+    },
+    {
+      "name": "manage_confluence_space",
+      "description": "List spaces, get space details, or manage space configuration"
+    },
+    {
+      "name": "search_confluence",
+      "description": "Search using CQL, full-text, labels, or contributors"
+    },
+    {
+      "name": "manage_confluence_media",
+      "description": "Upload, download, list, or delete page attachments"
+    },
+    {
+      "name": "navigate_confluence",
+      "description": "Navigate page hierarchy, discover links, backlinks, and related pages"
+    },
+    {
+      "name": "queue_confluence_operations",
+      "description": "Batch multiple operations in a single call with result references"
+    }
+  ],
+  "user_config": {
+    "confluence_api_token": {
+      "type": "string",
+      "title": "Confluence API Token",
+      "description": "Generate at https://id.atlassian.com/manage/api-tokens",
+      "sensitive": true,
+      "required": true
+    },
+    "confluence_email": {
+      "type": "string",
+      "title": "Confluence Email",
+      "description": "Your Atlassian account email address",
+      "required": true
+    },
+    "confluence_host": {
+      "type": "string",
+      "title": "Confluence Host",
+      "description": "Your Confluence instance URL (e.g., https://your-team.atlassian.net)",
+      "required": true
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ]
+  }
+}
