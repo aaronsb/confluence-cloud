@@ -3,18 +3,9 @@
  * See ADR-200: Hybrid REST and GraphQL Client.
  */
 
+import { MAX_RETRIES, sleep, parseRetryAfter, isRetryable } from './retry-utils.js';
+
 const AGG_ENDPOINT = 'https://api.atlassian.com/graphql';
-const MAX_RETRIES = 3;
-const INITIAL_BACKOFF_MS = 1000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function backoffDelay(attempt: number): number {
-  const base = INITIAL_BACKOFF_MS * Math.pow(2, attempt);
-  return base + Math.random() * base * 0.5;
-}
 
 function buildAuthHeader(email: string, apiToken: string): string {
   return `Basic ${Buffer.from(`${email}:${apiToken}`).toString('base64')}`;
@@ -81,7 +72,14 @@ export class GraphQLClient {
   async query<T>(
     queryText: string,
     variables: Record<string, unknown> = {},
-    attempt = 0,
+  ): Promise<{ success: boolean; data?: T; error?: string }> {
+    return this.queryWithRetry<T>(queryText, variables, 0);
+  }
+
+  private async queryWithRetry<T>(
+    queryText: string,
+    variables: Record<string, unknown>,
+    attempt: number,
   ): Promise<{ success: boolean; data?: T; error?: string }> {
     try {
       const response = await fetch(AGG_ENDPOINT, {
@@ -94,15 +92,12 @@ export class GraphQLClient {
         body: JSON.stringify({ query: queryText, variables }),
       });
 
-      // Rate limited or server error — retry with jittered backoff
-      if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
-        const retryAfter = response.headers.get('Retry-After');
-        const delayMs = retryAfter
-          ? parseInt(retryAfter, 10) * 1000
-          : backoffDelay(attempt);
+      if (isRetryable(response.status) && attempt < MAX_RETRIES) {
+        const delayMs = parseRetryAfter(response.headers.get('Retry-After'), attempt);
         console.error(`[confluence-cloud] GraphQL ${response.status}. Retrying in ${Math.round(delayMs)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await response.text(); // drain body to release socket
         await sleep(delayMs);
-        return this.query<T>(queryText, variables, attempt + 1);
+        return this.queryWithRetry<T>(queryText, variables, attempt + 1);
       }
 
       if (!response.ok) {

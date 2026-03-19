@@ -46,21 +46,7 @@ export interface ConfluenceClient {
 
 // ── REST v2 Implementation ─────────────────────────────────────
 
-// ── Rate Limiting ─────────────────────────────────────────────
-
-const MAX_RETRIES = 3;
-const INITIAL_BACKOFF_MS = 1000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/** Exponential backoff with jitter to prevent thundering herd. */
-function backoffDelay(attempt: number): number {
-  const base = INITIAL_BACKOFF_MS * Math.pow(2, attempt);
-  const jitter = Math.random() * base * 0.5; // 0-50% jitter
-  return base + jitter;
-}
+import { MAX_RETRIES, sleep, parseRetryAfter, isRetryable } from './retry-utils.js';
 
 // ── Client ────────────────────────────────────────────────────
 
@@ -97,21 +83,11 @@ export class ConfluenceRestClient implements ConfluenceClient {
       headers: { ...this.headers, ...options?.headers },
     });
 
-    // Rate limited — respect Retry-After or use exponential backoff with jitter
-    if (response.status === 429 && attempt < MAX_RETRIES) {
-      const retryAfter = response.headers.get('Retry-After');
-      const delayMs = retryAfter
-        ? parseInt(retryAfter, 10) * 1000
-        : backoffDelay(attempt);
-      console.error(`[confluence-cloud] Rate limited (429). Retrying in ${Math.round(delayMs)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
-      await sleep(delayMs);
-      return this.fetchWithRetry<T>(url, options, attempt + 1);
-    }
-
-    // Server error — retry with jittered backoff (may be transient)
-    if (response.status >= 500 && attempt < MAX_RETRIES) {
-      const delayMs = backoffDelay(attempt);
-      console.error(`[confluence-cloud] Server error (${response.status}). Retrying in ${Math.round(delayMs)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+    // Retryable status — backoff with jitter, respect Retry-After
+    if (isRetryable(response.status) && attempt < MAX_RETRIES) {
+      const delayMs = parseRetryAfter(response.headers.get('Retry-After'), attempt);
+      console.error(`[confluence-cloud] HTTP ${response.status}. Retrying in ${Math.round(delayMs)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await response.text(); // drain body to release socket
       await sleep(delayMs);
       return this.fetchWithRetry<T>(url, options, attempt + 1);
     }
