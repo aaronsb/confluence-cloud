@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { backoffDelay, parseRetryAfter, isRetryable, MAX_RETRY_DELAY_MS } from './retry-utils.js';
+import { backoffDelay, parseRetryAfter, isRetryable, MAX_RETRY_DELAY_MS, INITIAL_BACKOFF_MS } from './retry-utils.js';
 
 describe('retry-utils', () => {
   describe('backoffDelay', () => {
     it('should produce values within expected ceiling', () => {
       for (let attempt = 0; attempt < 4; attempt++) {
-        const ceiling = 1000 * Math.pow(2, attempt); // INITIAL_BACKOFF_MS * 2^attempt
+        const ceiling = INITIAL_BACKOFF_MS * Math.pow(2, attempt);
         for (let i = 0; i < 20; i++) {
           const delay = backoffDelay(attempt);
           expect(delay).toBeGreaterThanOrEqual(0);

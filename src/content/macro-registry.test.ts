@@ -1,8 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { MacroRegistry } from './macro-registry.js';
 
 describe('MacroRegistry', () => {
-  const registry = new MacroRegistry();
+  let registry: MacroRegistry;
+
+  beforeEach(() => {
+    registry = new MacroRegistry();
+  });
 
   it('should have built-in macros', () => {
     expect(registry.all().length).toBeGreaterThan(0);
