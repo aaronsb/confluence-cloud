@@ -46,6 +46,24 @@ export interface ConfluenceClient {
 
 // ── REST v2 Implementation ─────────────────────────────────────
 
+// ── Rate Limiting ─────────────────────────────────────────────
+
+const MAX_RETRIES = 3;
+const INITIAL_BACKOFF_MS = 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Exponential backoff with jitter to prevent thundering herd. */
+function backoffDelay(attempt: number): number {
+  const base = INITIAL_BACKOFF_MS * Math.pow(2, attempt);
+  const jitter = Math.random() * base * 0.5; // 0-50% jitter
+  return base + jitter;
+}
+
+// ── Client ────────────────────────────────────────────────────
+
 export class ConfluenceRestClient implements ConfluenceClient {
   private baseUrl: string;
   private baseUrlV1: string;
@@ -62,27 +80,41 @@ export class ConfluenceRestClient implements ConfluenceClient {
   }
 
   private async request<T>(path: string, options?: RequestInit): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
-    const response = await fetch(url, {
-      ...options,
-      headers: { ...this.headers, ...options?.headers },
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Confluence API error ${response.status}: ${body}`);
-    }
-
-    if (response.status === 204) return undefined as T;
-    return response.json() as Promise<T>;
+    return this.fetchWithRetry<T>(`${this.baseUrl}${path}`, options);
   }
 
   private async requestV1<T>(path: string, options?: RequestInit): Promise<T> {
-    const url = `${this.baseUrlV1}${path}`;
+    return this.fetchWithRetry<T>(`${this.baseUrlV1}${path}`, options);
+  }
+
+  /**
+   * Fetch with exponential backoff on 429 (rate limit) and 5xx (server errors).
+   * Respects Retry-After header when present.
+   */
+  private async fetchWithRetry<T>(url: string, options?: RequestInit, attempt = 0): Promise<T> {
     const response = await fetch(url, {
       ...options,
       headers: { ...this.headers, ...options?.headers },
     });
+
+    // Rate limited — respect Retry-After or use exponential backoff with jitter
+    if (response.status === 429 && attempt < MAX_RETRIES) {
+      const retryAfter = response.headers.get('Retry-After');
+      const delayMs = retryAfter
+        ? parseInt(retryAfter, 10) * 1000
+        : backoffDelay(attempt);
+      console.error(`[confluence-cloud] Rate limited (429). Retrying in ${Math.round(delayMs)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await sleep(delayMs);
+      return this.fetchWithRetry<T>(url, options, attempt + 1);
+    }
+
+    // Server error — retry with jittered backoff (may be transient)
+    if (response.status >= 500 && attempt < MAX_RETRIES) {
+      const delayMs = backoffDelay(attempt);
+      console.error(`[confluence-cloud] Server error (${response.status}). Retrying in ${Math.round(delayMs)}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      await sleep(delayMs);
+      return this.fetchWithRetry<T>(url, options, attempt + 1);
+    }
 
     if (!response.ok) {
       const body = await response.text();
