@@ -61,6 +61,10 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
         return parseTable(node);
       case 'codeBlock':
         return parseCodeBlock(node);
+      case 'panel':
+        return parsePanel(node);
+      case 'expand':
+        return parseExpand(node);
       case 'extension':
       case 'bodiedExtension':
         return parseMacro(node);
@@ -74,6 +78,30 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
       default:
         return parseRawAdf(node);
     }
+  }
+
+  function parsePanel(node: AdfNode): MacroBlock {
+    const panelType = (node.attrs?.panelType as string) ?? 'info';
+    const body = node.content ? node.content.map(parseNode) : undefined;
+    return {
+      type: 'macro',
+      macroId: panelType, // info, note, warning, error, success
+      params: {},
+      body: body && body.length > 0 ? body : undefined,
+      id: nextId(),
+    };
+  }
+
+  function parseExpand(node: AdfNode): MacroBlock {
+    const title = (node.attrs?.title as string) ?? '';
+    const body = node.content ? node.content.map(parseNode) : undefined;
+    return {
+      type: 'macro',
+      macroId: 'expand',
+      params: { title },
+      body: body && body.length > 0 ? body : undefined,
+      id: nextId(),
+    };
   }
 
   function parseHeading(node: AdfNode): ParagraphBlock {
@@ -130,10 +158,14 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
   function parseMacro(node: AdfNode): MacroBlock {
     const attrs = node.attrs ?? {};
     const extensionKey = (attrs.extensionKey as string) ?? 'unknown';
-    const rawParams = (attrs.parameters as Record<string, { value: string }>) ?? {};
+
+    // Parameters may be nested under macroParams (Confluence canonical format)
+    const parameters = attrs.parameters as Record<string, unknown> | undefined;
+    const macroParams = (parameters?.macroParams ?? parameters ?? {}) as Record<string, { value: string }>;
 
     const params: Record<string, string> = {};
-    for (const [key, val] of Object.entries(rawParams)) {
+    for (const [key, val] of Object.entries(macroParams)) {
+      if (key === 'macroMetadata') continue; // skip metadata, not a user param
       params[key] = typeof val === 'object' && val !== null && 'value' in val ? val.value : String(val);
     }
 
@@ -168,12 +200,14 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
     return { type: 'list', ordered, items, id: nextId() };
   }
 
-  function parseListItem(node: AdfNode): { text: string; children?: { text: string }[] } {
+  function parseListItem(node: AdfNode): { text: string; children?: { text: string }[]; childrenOrdered?: boolean } {
     const textParts: string[] = [];
     const children: { text: string }[] = [];
+    let childrenOrdered: boolean | undefined;
 
     for (const child of node.content ?? []) {
       if (child.type === 'bulletList' || child.type === 'orderedList') {
+        childrenOrdered = child.type === 'orderedList';
         for (const subItem of child.content ?? []) {
           children.push({ text: extractText(subItem) });
         }
@@ -185,6 +219,7 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
     return {
       text: textParts.join('\n'),
       children: children.length > 0 ? children : undefined,
+      childrenOrdered,
     };
   }
 
@@ -205,6 +240,13 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
 function extractText(node: AdfNode): string {
   if (node.text) {
     return applyMarks(node.text, node.marks);
+  }
+
+  // Inline status node → render as directive
+  if (node.type === 'status') {
+    const color = (node.attrs?.color as string) ?? 'grey';
+    const text = (node.attrs?.text as string) ?? '';
+    return `:::status{color="${color}" title="${text}"}:::`;
   }
 
   if (!node.content) return '';

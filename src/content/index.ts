@@ -4,6 +4,8 @@ export type {
   MacroBlock, MediaBlock, ListBlock, RawAdfBlock, ListItem,
 } from './blocks.js';
 export { parseAdf, type AdfNode } from './adf-parser.js';
+export { serializeBlocks } from './adf-serializer.js';
+export { parseDirectives } from './directive-parser.js';
 export { renderBlocks } from './renderer.js';
 export { MacroRegistry } from './macro-registry.js';
 export type { MacroDefinition, MacroParamSchema, MacroValidationError } from './macro-registry.js';
