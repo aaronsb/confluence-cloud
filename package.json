@@ -1,6 +1,6 @@
 {
   "name": "@aaronsb/confluence-cloud-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "mcpName": "io.github.aaronsb/confluence-cloud",
   "description": "Model Context Protocol (MCP) server for Confluence Cloud - enables AI assistants to interact with Confluence",
   "type": "module",
