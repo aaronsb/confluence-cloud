@@ -19,7 +19,7 @@ export interface ConfluenceClient {
   // Pages
   getPage(id: string, expand?: string[]): Promise<Page>;
   createPage(spaceId: string, title: string, body?: object, parentId?: string): Promise<Page>;
-  updatePage(id: string, title: string, body: object, version: number, message?: string): Promise<Page>;
+  updatePage(id: string, title: string | undefined, body: object, version: number, message?: string): Promise<Page>;
   deletePage(id: string): Promise<void>;
 
   // Page hierarchy
@@ -123,10 +123,17 @@ export class ConfluenceRestClient implements ConfluenceClient {
     return mapPage(raw);
   }
 
-  async updatePage(id: string, title: string, body: object, version: number, message?: string): Promise<Page> {
+  async updatePage(id: string, title: string | undefined, body: object, version: number, message?: string): Promise<Page> {
+    // If title not provided, fetch current title
+    let pageTitle = title;
+    if (!pageTitle) {
+      const current = await this.request<ConfluenceV2Page>(`/pages/${id}`);
+      pageTitle = current.title;
+    }
+
     const payload = {
       id,
-      title,
+      title: pageTitle,
       status: 'current',
       body: {
         representation: 'atlas_doc_format',
