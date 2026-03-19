@@ -31,7 +31,7 @@ Expose **7 MCP tools**, each with an `operation` parameter for dispatch:
 | Tool | Operations | Scope |
 |------|-----------|-------|
 | `manage_confluence_page` | get, create, update, delete, move, copy, get_versions, pull_for_editing | Page CRUD and lifecycle |
-| `edit_confluence_content` | patch_section, patch_block, append, replace, window_edit | Structural content editing (ADR-301) |
+| `edit_confluence_content` | patch_section, patch_block, append, replace, window_edit, list_blocks, sync, close | Structural content editing (ADR-301) |
 | `manage_confluence_space` | list, get, create, update, get_permissions | Space management |
 | `search_confluence` | cql, fulltext, by_label, by_contributor, recent | Search and discovery |
 | `manage_confluence_media` | upload, download, list, delete, get_info | Attachments and images |

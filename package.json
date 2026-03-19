@@ -1,0 +1,58 @@
+{
+  "name": "@aaronsb/confluence-cloud-mcp",
+  "version": "0.1.0",
+  "mcpName": "io.github.aaronsb/confluence-cloud",
+  "description": "Model Context Protocol (MCP) server for Confluence Cloud - enables AI assistants to interact with Confluence",
+  "type": "module",
+  "bin": {
+    "confluence-cloud-mcp": "build/index.js"
+  },
+  "files": [
+    "build"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "confluence",
+    "confluence-cloud",
+    "atlassian",
+    "ai",
+    "claude",
+    "llm"
+  ],
+  "author": "aaronsb",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aaronsb/confluence-cloud.git"
+  },
+  "homepage": "https://github.com/aaronsb/confluence-cloud#readme",
+  "bugs": {
+    "url": "https://github.com/aaronsb/confluence-cloud/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "postbuild": "node --eval \"import('fs').then(fs => fs.chmodSync('build/index.js', '755'))\"",
+    "prepare": "npm run build",
+    "test": "vitest run",
+    "lint": "eslint --ext .ts src/",
+    "lint:fix": "eslint --ext .ts src/ --fix",
+    "watch": "tsc --watch",
+    "inspector": "npx @modelcontextprotocol/inspector build/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-import": "^2.32.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
