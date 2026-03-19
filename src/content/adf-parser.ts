@@ -61,6 +61,10 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
         return parseTable(node);
       case 'codeBlock':
         return parseCodeBlock(node);
+      case 'panel':
+        return parsePanel(node);
+      case 'expand':
+        return parseExpand(node);
       case 'extension':
       case 'bodiedExtension':
         return parseMacro(node);
@@ -74,6 +78,30 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
       default:
         return parseRawAdf(node);
     }
+  }
+
+  function parsePanel(node: AdfNode): MacroBlock {
+    const panelType = (node.attrs?.panelType as string) ?? 'info';
+    const body = node.content ? node.content.map(parseNode) : undefined;
+    return {
+      type: 'macro',
+      macroId: panelType, // info, note, warning, error, success
+      params: {},
+      body: body && body.length > 0 ? body : undefined,
+      id: nextId(),
+    };
+  }
+
+  function parseExpand(node: AdfNode): MacroBlock {
+    const title = (node.attrs?.title as string) ?? '';
+    const body = node.content ? node.content.map(parseNode) : undefined;
+    return {
+      type: 'macro',
+      macroId: 'expand',
+      params: { title },
+      body: body && body.length > 0 ? body : undefined,
+      id: nextId(),
+    };
   }
 
   function parseHeading(node: AdfNode): ParagraphBlock {
@@ -205,6 +233,13 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
 function extractText(node: AdfNode): string {
   if (node.text) {
     return applyMarks(node.text, node.marks);
+  }
+
+  // Inline status node → render as directive
+  if (node.type === 'status') {
+    const color = (node.attrs?.color as string) ?? 'grey';
+    const text = (node.attrs?.text as string) ?? '';
+    return `:::status{color="${color}" title="${text}"}:::`;
   }
 
   if (!node.content) return '';

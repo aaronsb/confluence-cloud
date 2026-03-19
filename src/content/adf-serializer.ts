@@ -123,8 +123,44 @@ function serializeCodeBlock(block: CodeBlock): AdfNode {
 
 // ── Macro ──────────────────────────────────────────────────────
 
+/** Panel types that map to native ADF panel nodes */
+const PANEL_TYPES = new Set(['info', 'note', 'warning', 'error', 'success']);
+
 function serializeMacro(block: MacroBlock): AdfNode {
-  // Wrap params in Confluence's {value: string} format
+  // Status → native inline node wrapped in paragraph
+  if (block.macroId === 'status') {
+    return {
+      type: 'paragraph',
+      content: [{
+        type: 'status',
+        attrs: {
+          text: block.params.title ?? '',
+          color: block.params.color ?? 'grey',
+          style: 'bold',
+        },
+      }],
+    };
+  }
+
+  // Panel types → native ADF panel node
+  if (PANEL_TYPES.has(block.macroId)) {
+    return {
+      type: 'panel',
+      attrs: { panelType: block.macroId },
+      content: block.body ? block.body.flatMap(serializeBlock) : [],
+    };
+  }
+
+  // Expand → native ADF expand node
+  if (block.macroId === 'expand') {
+    return {
+      type: 'expand',
+      attrs: { title: block.params.title ?? '' },
+      content: block.body ? block.body.flatMap(serializeBlock) : [],
+    };
+  }
+
+  // Everything else → extension/bodiedExtension (third-party macros)
   const macroParams: Record<string, { value: string }> = {};
   for (const [key, val] of Object.entries(block.params)) {
     macroParams[key] = { value: val };
@@ -136,7 +172,6 @@ function serializeMacro(block: MacroBlock): AdfNode {
     parameters: { macroParams },
   };
 
-  // Bodied macros (panels, expand, excerpt) use bodiedExtension
   if (block.body && block.body.length > 0) {
     return {
       type: 'bodiedExtension',
@@ -145,10 +180,7 @@ function serializeMacro(block: MacroBlock): AdfNode {
     };
   }
 
-  return {
-    type: 'extension',
-    attrs,
-  };
+  return { type: 'extension', attrs };
 }
 
 // ── Media ──────────────────────────────────────────────────────
