@@ -8,9 +8,10 @@ import type { Page, Space, SearchResult, Attachment } from '../types/index.js';
 export function renderPage(page: Page, options?: { showBody?: boolean }): string {
   const lines: string[] = [];
 
-  // Header line: icon + title + space + status + version + date
+  // Header line: icon + title + id + space + status + version + date
   const parts = [
     `📄 ${page.title}`,
+    `id:${page.id}`,
     page.spaceKey ?? page.spaceId,
     page.status,
     `v${page.version.number}`,
@@ -50,6 +51,7 @@ export function renderPageList(pages: Page[]): string {
   return pages.map(p => {
     const parts = [
       `📄 ${p.title}`,
+      `id:${p.id}`,
       p.spaceKey ?? p.spaceId,
       p.status,
       `v${p.version.number}`,
@@ -83,7 +85,7 @@ export function renderSearchResults(results: SearchResult): string {
   lines.push('');
 
   for (const item of results.results) {
-    lines.push(`📄 ${item.content.title} | ${item.content.spaceKey ?? item.content.spaceId}`);
+    lines.push(`📄 ${item.content.title} | id:${item.content.id} | ${item.content.spaceKey ?? item.content.spaceId}`);
     if (item.excerpt) {
       lines.push(`  ${item.excerpt.substring(0, 200)}`);
     }
