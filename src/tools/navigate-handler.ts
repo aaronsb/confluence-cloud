@@ -4,7 +4,7 @@
 
 import type { ToolResponse } from '../types/index.js';
 import type { NavigationService } from '../navigation/navigation-service.js';
-import { renderPageList, renderTree } from '../rendering/markdown-renderer.js';
+import { renderPageList, renderTree, renderSearchResults } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
 
 interface NavigateArgs {
@@ -51,10 +51,45 @@ export async function handleNavigateRequest(
       return { content: [{ type: 'text', text }] };
     }
 
-    case 'links':
-    case 'backlinks':
-    case 'related':
-      return { content: [{ type: 'text', text: `Operation '${args.operation}' is not yet implemented.` }] };
+    case 'links': {
+      const links = await nav.getForwardLinks(args.pageId);
+      if (links.length === 0) {
+        let text = 'No outgoing links found on this page.';
+        text += getNextSteps('navigate', { pageId: args.pageId });
+        return { content: [{ type: 'text', text }] };
+      }
+      const linkLines = links.map(l => {
+        const target = l.pageId ? `page:${l.pageId}` : l.url;
+        return `  🔗 [${l.text}](${l.url}) → ${target}`;
+      });
+      let text = `Forward links from ${args.pageId} (${links.length}):\n\n${linkLines.join('\n')}`;
+      text += getNextSteps('navigate', { pageId: args.pageId });
+      return { content: [{ type: 'text', text }] };
+    }
+
+    case 'backlinks': {
+      const results = await nav.getBacklinks(args.pageId);
+      if (results.totalSize === 0) {
+        let text = 'No pages link to this page.';
+        text += getNextSteps('navigate', { pageId: args.pageId });
+        return { content: [{ type: 'text', text }] };
+      }
+      let text = `Pages linking to ${args.pageId}:\n\n${renderSearchResults(results)}`;
+      text += getNextSteps('navigate', { pageId: args.pageId });
+      return { content: [{ type: 'text', text }] };
+    }
+
+    case 'related': {
+      const { pages, sharedLabels } = await nav.getRelated(args.pageId);
+      if (pages.length === 0) {
+        let text = 'No related pages found (page has no labels, or no other pages share them).';
+        text += getNextSteps('navigate', { pageId: args.pageId });
+        return { content: [{ type: 'text', text }] };
+      }
+      let text = `Related pages (by shared labels, ${pages.length} found):\n\n${renderPageList(pages)}`;
+      text += getNextSteps('navigate', { pageId: args.pageId });
+      return { content: [{ type: 'text', text }] };
+    }
 
     default:
       return { content: [{ type: 'text', text: `Unknown navigation operation: ${args.operation}` }], isError: true };
