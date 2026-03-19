@@ -44,10 +44,7 @@
     "inspector": "npx @modelcontextprotocol/inspector build/index.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "confluence.js": "^2.1.0",
-    "graphql-request": "^7.1.2",
-    "graphql": "^16.10.0"
+    "@modelcontextprotocol/sdk": "^1.27.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.24",

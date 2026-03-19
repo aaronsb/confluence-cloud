@@ -7,7 +7,7 @@ import type { SessionManager } from '../sessions/editing-session.js';
 import type { ToolResponse } from '../types/index.js';
 import { renderPage, renderPageList } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
-import { parseAdf, resetIdCounter, type AdfNode } from '../content/adf-parser.js';
+import { parseAdf, type AdfNode } from '../content/adf-parser.js';
 import { renderBlocks } from '../content/renderer.js';
 
 interface PageArgs {
@@ -35,6 +35,9 @@ export async function handlePageRequest(
       return handleDelete(client, args);
     case 'pull_for_editing':
       return handlePullForEditing(client, sessions, args);
+    case 'move':
+    case 'copy':
+      return { content: [{ type: 'text', text: `Operation '${args.operation}' is not yet implemented.` }] };
     case 'get_versions':
       return handleGetVersions(client, args);
     default:
@@ -53,8 +56,7 @@ async function handleGet(client: ConfluenceClient, args: PageArgs): Promise<Tool
 
   // If body expanded and ADF available, render the content model
   if (showBody && page.body?.atlas_doc_format) {
-    resetIdCounter();
-    const blocks = parseAdf(page.body.atlas_doc_format as unknown as AdfNode);
+    const blocks = parseAdf(page.body.atlas_doc_format as AdfNode);
     text += '\n\n---\n\n' + renderBlocks(blocks);
   }
 
@@ -120,8 +122,7 @@ async function handlePullForEditing(
     return { content: [{ type: 'text', text: 'Page has no ADF content body.' }], isError: true };
   }
 
-  resetIdCounter();
-  const blocks = parseAdf(page.body.atlas_doc_format as unknown as AdfNode);
+  const blocks = parseAdf(page.body.atlas_doc_format as AdfNode);
   const sessionId = sessions.create(args.pageId, page.spaceKey ?? page.spaceId, page.version.number, blocks);
 
   const rendered = renderBlocks(blocks);

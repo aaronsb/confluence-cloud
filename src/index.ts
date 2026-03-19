@@ -28,6 +28,7 @@ import { handleSearchRequest } from './tools/search-handler.js';
 import { handleMediaRequest } from './tools/media-handler.js';
 import { handleNavigateRequest } from './tools/navigate-handler.js';
 import { handleQueueRequest } from './tools/queue-handler.js';
+import { NavigationService } from './navigation/navigation-service.js';
 import type { ToolResponse } from './types/index.js';
 
 // ── Configuration ──────────────────────────────────────────────
@@ -61,6 +62,7 @@ const client = new ConfluenceRestClient({
 
 const sessions = new SessionManager();
 const macroRegistry = new MacroRegistry();
+const navigation = new NavigationService(client);
 
 // ── MCP Server ─────────────────────────────────────────────────
 
@@ -90,7 +92,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   manage_confluence_space: (args) => handleSpaceRequest(client, args),
   search_confluence: (args) => handleSearchRequest(client, args),
   manage_confluence_media: (args) => handleMediaRequest(client, args),
-  navigate_confluence: (args) => handleNavigateRequest(client, args),
+  navigate_confluence: (args) => handleNavigateRequest(navigation, args),
   queue_confluence_operations: (args) =>
     handleQueueRequest(
       async (toolName, toolArgs) => {

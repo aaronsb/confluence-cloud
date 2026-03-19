@@ -18,6 +18,11 @@ interface SearchArgs {
   limit?: number;
 }
 
+/** Escape a value for safe interpolation into CQL strings. */
+function escapeCql(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 export async function handleSearchRequest(
   client: ConfluenceClient,
   args: SearchArgs,
@@ -36,29 +41,29 @@ export async function handleSearchRequest(
       if (!args.query) {
         return { content: [{ type: 'text', text: 'query is required for fulltext operation' }], isError: true };
       }
-      cql = `type = page AND text ~ "${args.query}"`;
-      if (args.spaceKey) cql += ` AND space = "${args.spaceKey}"`;
+      cql = `type = page AND text ~ "${escapeCql(args.query)}"`;
+      if (args.spaceKey) cql += ` AND space = "${escapeCql(args.spaceKey)}"`;
       break;
 
     case 'by_label':
       if (!args.labels || args.labels.length === 0) {
         return { content: [{ type: 'text', text: 'labels array is required for by_label operation' }], isError: true };
       }
-      cql = `type = page AND label IN (${args.labels.map(l => `"${l}"`).join(', ')})`;
-      if (args.spaceKey) cql += ` AND space = "${args.spaceKey}"`;
+      cql = `type = page AND label IN (${args.labels.map(l => `"${escapeCql(l)}"`).join(', ')})`;
+      if (args.spaceKey) cql += ` AND space = "${escapeCql(args.spaceKey)}"`;
       break;
 
     case 'by_contributor':
       if (!args.contributor) {
         return { content: [{ type: 'text', text: 'contributor is required for by_contributor operation' }], isError: true };
       }
-      cql = `type = page AND contributor = "${args.contributor}"`;
-      if (args.spaceKey) cql += ` AND space = "${args.spaceKey}"`;
+      cql = `type = page AND contributor = "${escapeCql(args.contributor)}"`;
+      if (args.spaceKey) cql += ` AND space = "${escapeCql(args.spaceKey)}"`;
       break;
 
     case 'recent':
       cql = 'type = page ORDER BY lastmodified DESC';
-      if (args.spaceKey) cql = `type = page AND space = "${args.spaceKey}" ORDER BY lastmodified DESC`;
+      if (args.spaceKey) cql = `type = page AND space = "${escapeCql(args.spaceKey)}" ORDER BY lastmodified DESC`;
       break;
 
     default:

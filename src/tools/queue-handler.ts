@@ -27,21 +27,23 @@ export async function handleQueueRequest(
     return { content: [{ type: 'text', text: 'Maximum 16 operations per queue' }], isError: true };
   }
 
-  const results: ToolResponse[] = [];
+  const resultMetadata: Array<Record<string, string>> = [];
   const outputs: string[] = [];
 
   for (let i = 0; i < args.operations.length; i++) {
     const op = args.operations[i];
-    const resolvedArgs = resolveReferences(op.args, results);
+    const resolvedArgs = resolveReferences(op.args, resultMetadata);
 
     try {
       const result = await dispatch(op.tool, resolvedArgs);
-      results.push(result);
 
       const text = result.content
         .filter(c => c.type === 'text')
         .map(c => c.text)
         .join('\n');
+
+      // Extract metadata from the result for future $N.field references
+      resultMetadata.push(extractMetadata(text, resolvedArgs));
 
       outputs.push(`### Operation ${i + 1}: ${op.tool}\n${result.isError ? '❌ ' : '✅ '}${text}`);
 
@@ -51,7 +53,7 @@ export async function handleQueueRequest(
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      results.push({ content: [{ type: 'text', text: message }], isError: true });
+      resultMetadata.push({});
       outputs.push(`### Operation ${i + 1}: ${op.tool}\n❌ Error: ${message}`);
 
       if ((op.onError ?? 'bail') === 'bail') {
@@ -67,11 +69,11 @@ export async function handleQueueRequest(
 }
 
 /**
- * Resolve $N.field references in args from prior results.
+ * Resolve $N.field references in args from prior result metadata.
  */
 function resolveReferences(
   args: Record<string, unknown>,
-  results: ToolResponse[],
+  metadata: Array<Record<string, string>>,
 ): Record<string, unknown> {
   const resolved: Record<string, unknown> = {};
 
@@ -80,8 +82,13 @@ function resolveReferences(
       const match = value.match(/^\$(\d+)\.(.+)/);
       if (match) {
         const refIdx = parseInt(match[1], 10);
-        // Reference resolution would need structured result data
-        // For now, pass through as-is with a note
+        const field = match[2];
+        if (refIdx >= 0 && refIdx < metadata.length && metadata[refIdx][field]) {
+          resolved[key] = metadata[refIdx][field];
+        } else {
+          resolved[key] = value; // Unresolvable — pass through
+        }
+      } else {
         resolved[key] = value;
       }
     } else {
@@ -90,4 +97,32 @@ function resolveReferences(
   }
 
   return resolved;
+}
+
+/**
+ * Extract common metadata fields from result text and input args.
+ * Looks for IDs, keys, and handles that downstream operations reference.
+ */
+function extractMetadata(text: string, args: Record<string, unknown>): Record<string, string> {
+  const meta: Record<string, string> = {};
+
+  // Carry forward input args that are common reference targets
+  if (typeof args.pageId === 'string') meta.pageId = args.pageId;
+  if (typeof args.spaceId === 'string') meta.spaceId = args.spaceId;
+  if (typeof args.spaceKey === 'string') meta.spaceKey = args.spaceKey;
+  if (typeof args.attachmentId === 'string') meta.attachmentId = args.attachmentId;
+
+  // Extract session handle from pull_for_editing output
+  const sessionMatch = text.match(/Session:\s*([a-f0-9-]+)/);
+  if (sessionMatch) meta.sessionHandle = sessionMatch[1];
+
+  // Extract page ID from "Created page" or similar output patterns
+  const pageIdMatch = text.match(/pageId["\s:]+([0-9]+)/);
+  if (pageIdMatch) meta.pageId = pageIdMatch[1];
+
+  // Extract version number
+  const versionMatch = text.match(/Version:\s*(\d+)/);
+  if (versionMatch) meta.version = versionMatch[1];
+
+  return meta;
 }

@@ -2,9 +2,8 @@
  * Handler for navigate_confluence tool.
  */
 
-import type { ConfluenceClient } from '../client/confluence-client.js';
 import type { ToolResponse } from '../types/index.js';
-import { NavigationService } from '../navigation/navigation-service.js';
+import type { NavigationService } from '../navigation/navigation-service.js';
 import { renderPageList, renderTree } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
 
@@ -17,10 +16,9 @@ interface NavigateArgs {
 }
 
 export async function handleNavigateRequest(
-  client: ConfluenceClient,
+  nav: NavigationService,
   args: NavigateArgs,
 ): Promise<ToolResponse> {
-  const nav = new NavigationService(client);
 
   switch (args.operation) {
     case 'children': {

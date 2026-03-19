@@ -20,6 +20,9 @@ yarn-error.log*
 .env*
 !.env.example
 
+# MCP config (contains credentials)
+.mcp.json
+
 # IDE files
 .vscode/
 .idea/

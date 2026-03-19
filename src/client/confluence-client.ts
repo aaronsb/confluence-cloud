@@ -331,7 +331,7 @@ interface ConfluenceV1Content {
   status: string;
   _expandable?: Record<string, string>;
   space?: { key: string; id: number };
-  version?: { number: number; when: string; by?: { displayName: string } };
+  version?: { number: number; when: string; by?: { accountId?: string; displayName: string } };
 }
 
 // ── Mappers ────────────────────────────────────────────────────
@@ -397,10 +397,10 @@ function mapV1Content(raw: ConfluenceV1Content): Page {
     version: {
       number: raw.version?.number ?? 1,
       createdAt: raw.version?.when ?? '',
-      authorId: raw.version?.by?.displayName ?? '',
+      authorId: raw.version?.by?.accountId ?? raw.version?.by?.displayName ?? '',
     },
     createdAt: raw.version?.when ?? '',
-    authorId: raw.version?.by?.displayName ?? '',
+    authorId: raw.version?.by?.accountId ?? raw.version?.by?.displayName ?? '',
   };
 }
 

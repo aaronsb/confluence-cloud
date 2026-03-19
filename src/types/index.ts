@@ -42,10 +42,17 @@ export interface PageVersion {
 }
 
 export interface PageBody {
-  /** Raw ADF JSON from Confluence API */
-  atlas_doc_format?: object;
+  /** Parsed ADF document from Confluence API */
+  atlas_doc_format?: AdfDocument;
   /** Storage format (XHTML, legacy) */
   storage?: string;
+}
+
+/** Minimal ADF document shape for type safety */
+export interface AdfDocument {
+  type: string;
+  content?: unknown[];
+  [key: string]: unknown;
 }
 
 export interface Space {
