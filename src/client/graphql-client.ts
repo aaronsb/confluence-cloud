@@ -101,13 +101,14 @@ export class GraphQLClient {
   /**
    * Get pages linking TO a Confluence page (backlinks).
    */
-  async getIncomingLinks(pageId: string): Promise<string[]> {
+  async getIncomingLinks(pageId: string): Promise<{ pageIds: string[]; hasMore: boolean }> {
     const pageAri = this.buildPageAri(pageId);
 
     const result = await this.query<{
       linksIncomingToConfluencePage: CypherQueryConnection;
     }>(`query GetBacklinks($pageId: ID!) {
       linksIncomingToConfluencePage(pageId: $pageId) {
+        pageInfo { hasNextPage }
         queryResult {
           columns
           rows { rowItems { key value { id } } }
@@ -115,20 +116,25 @@ export class GraphQLClient {
       }
     }`, { pageId: pageAri });
 
-    if (!result.success || !result.data) return [];
-    return extractPageIdsFromRows(result.data.linksIncomingToConfluencePage);
+    if (!result.success || !result.data) return { pageIds: [], hasMore: false };
+    const conn = result.data.linksIncomingToConfluencePage;
+    return {
+      pageIds: extractPageIdsFromRows(conn),
+      hasMore: conn.pageInfo?.hasNextPage ?? false,
+    };
   }
 
   /**
    * Get pages linked FROM a Confluence page (forward links).
    */
-  async getOutgoingLinks(pageId: string): Promise<string[]> {
+  async getOutgoingLinks(pageId: string): Promise<{ pageIds: string[]; hasMore: boolean }> {
     const pageAri = this.buildPageAri(pageId);
 
     const result = await this.query<{
       linksOutgoingFromConfluencePage: CypherQueryConnection;
     }>(`query GetForwardLinks($pageId: ID!) {
       linksOutgoingFromConfluencePage(pageId: $pageId) {
+        pageInfo { hasNextPage }
         queryResult {
           columns
           rows { rowItems { key value { id } } }
@@ -136,8 +142,12 @@ export class GraphQLClient {
       }
     }`, { pageId: pageAri });
 
-    if (!result.success || !result.data) return [];
-    return extractPageIdsFromRows(result.data.linksOutgoingFromConfluencePage);
+    if (!result.success || !result.data) return { pageIds: [], hasMore: false };
+    const conn = result.data.linksOutgoingFromConfluencePage;
+    return {
+      pageIds: extractPageIdsFromRows(conn),
+      hasMore: conn.pageInfo?.hasNextPage ?? false,
+    };
   }
 }
 
@@ -149,6 +159,7 @@ interface GraphQLResponse<T> {
 }
 
 interface CypherQueryConnection {
+  pageInfo?: { hasNextPage: boolean };
   queryResult: {
     columns: string[];
     rows: Array<{

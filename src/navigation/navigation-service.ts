@@ -97,16 +97,19 @@ export class NavigationService {
   async getForwardLinks(pageId: string): Promise<Array<{ pageId?: string; url: string; text: string }>> {
     // GraphQL path — uses the link graph
     if (this.graphql) {
-      const linkedPageIds = await this.graphql.getOutgoingLinks(pageId);
-      if (linkedPageIds.length === 0) return [];
+      const { pageIds, hasMore } = await this.graphql.getOutgoingLinks(pageId);
+      if (pageIds.length === 0) return [];
 
       const results = await Promise.allSettled(
-        linkedPageIds.map(id => this.client.getPage(id))
+        pageIds.map(id => this.client.getPage(id))
       );
+      if (hasMore) {
+        console.error(`[confluence-cloud] Forward links for ${pageId}: results may be truncated by the API`);
+      }
       return results.map((r, i) => ({
-        pageId: linkedPageIds[i],
+        pageId: pageIds[i],
         url: '',
-        text: r.status === 'fulfilled' ? r.value.title : `(page ${linkedPageIds[i]})`,
+        text: r.status === 'fulfilled' ? r.value.title : `(page ${pageIds[i]})`,
       }));
     }
 
@@ -162,16 +165,20 @@ export class NavigationService {
   async getBacklinks(pageId: string): Promise<Page[]> {
     // GraphQL path — uses the link graph (fast, accurate)
     if (this.graphql) {
-      const linkedPageIds = await this.graphql.getIncomingLinks(pageId);
-      if (linkedPageIds.length === 0) return [];
+      const { pageIds, hasMore } = await this.graphql.getIncomingLinks(pageId);
+      if (pageIds.length === 0) return [];
 
       // Fetch page details in parallel
       const results = await Promise.allSettled(
-        linkedPageIds.map(id => this.client.getPage(id))
+        pageIds.map(id => this.client.getPage(id))
       );
-      return results
+      const pages = results
         .filter((r): r is PromiseFulfilledResult<Page> => r.status === 'fulfilled')
         .map(r => r.value);
+      if (hasMore) {
+        console.error(`[confluence-cloud] Backlinks for ${pageId}: results may be truncated by the API`);
+      }
+      return pages;
     }
 
     // Fallback — CQL text search for the page URL (approximate)
