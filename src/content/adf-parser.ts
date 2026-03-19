@@ -158,10 +158,14 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
   function parseMacro(node: AdfNode): MacroBlock {
     const attrs = node.attrs ?? {};
     const extensionKey = (attrs.extensionKey as string) ?? 'unknown';
-    const rawParams = (attrs.parameters as Record<string, { value: string }>) ?? {};
+
+    // Parameters may be nested under macroParams (Confluence canonical format)
+    const parameters = attrs.parameters as Record<string, unknown> | undefined;
+    const macroParams = (parameters?.macroParams ?? parameters ?? {}) as Record<string, { value: string }>;
 
     const params: Record<string, string> = {};
-    for (const [key, val] of Object.entries(rawParams)) {
+    for (const [key, val] of Object.entries(macroParams)) {
+      if (key === 'macroMetadata') continue; // skip metadata, not a user param
       params[key] = typeof val === 'object' && val !== null && 'value' in val ? val.value : String(val);
     }
 

@@ -267,11 +267,13 @@ function parseInlineText(text: string): AdfNode[] {
       // ~~strike~~
       nodes.push({ type: 'text', text: match[5], marks: [{ type: 'strike' }] });
     } else if (match[6] && match[7]) {
-      // [text](url)
+      // [text](url) — only allow safe protocols
+      const href = match[7];
+      const isSafe = /^(https?:\/\/|\/|#|mailto:)/.test(href);
       nodes.push({
         type: 'text',
         text: match[6],
-        marks: [{ type: 'link', attrs: { href: match[7] } }],
+        marks: isSafe ? [{ type: 'link', attrs: { href } }] : [],
       });
     }
 

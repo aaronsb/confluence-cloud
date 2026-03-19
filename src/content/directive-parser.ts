@@ -83,7 +83,7 @@ export function parseDirectives(input: string): Block[] {
     // Block directive opening: :::name{params} or :::panel{type="info" title="..."}
     const blockDirectiveMatch = line.match(/^:::(\w[\w-]*)\{?([^}]*)?\}?\s*$/);
     if (blockDirectiveMatch && !line.endsWith(':::')) {
-      const macroId = normalizeDirectiveName(blockDirectiveMatch[1]);
+      const macroId = blockDirectiveMatch[1];
       const params = parseDirectiveParams(blockDirectiveMatch[2] ?? '');
       const bodyLines: string[] = [];
       i++;
@@ -183,12 +183,6 @@ function parseDirectiveParams(raw: string): Record<string, string> {
     params[key] = value;
   }
   return params;
-}
-
-function normalizeDirectiveName(name: string): string {
-  // Map panel{type="info"} → info, panel{type="warning"} → warning, etc.
-  if (name === 'panel') return name; // handled by params
-  return name;
 }
 
 function parseMarkdownTable(lines: string[], id: string): TableBlock | null {

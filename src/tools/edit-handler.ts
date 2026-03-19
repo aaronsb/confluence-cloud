@@ -308,7 +308,7 @@ async function handleSync(
   try {
     const page = await client.updatePage(
       session.pageId,
-      undefined as unknown as string, // keep existing title
+      undefined, // keep existing title
       adf,
       session.version,
       args.message,

@@ -8,6 +8,10 @@ import type { GraphQLClient } from '../client/graphql-client.js';
 import type { Page } from '../types/index.js';
 import type { AdfNode } from '../content/adf-parser.js';
 
+function escapeCql(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 export interface TreeNode {
   page: Page;
   depth: number;
@@ -94,16 +98,16 @@ export class NavigationService {
     // GraphQL path — uses the link graph
     if (this.graphql) {
       const linkedPageIds = await this.graphql.getOutgoingLinks(pageId);
-      const links: Array<{ pageId?: string; url: string; text: string }> = [];
-      for (const id of linkedPageIds) {
-        try {
-          const page = await this.client.getPage(id);
-          links.push({ pageId: id, url: '', text: page.title });
-        } catch {
-          links.push({ pageId: id, url: '', text: `(page ${id})` });
-        }
-      }
-      return links;
+      if (linkedPageIds.length === 0) return [];
+
+      const results = await Promise.allSettled(
+        linkedPageIds.map(id => this.client.getPage(id))
+      );
+      return results.map((r, i) => ({
+        pageId: linkedPageIds[i],
+        url: '',
+        text: r.status === 'fulfilled' ? r.value.title : `(page ${linkedPageIds[i]})`,
+      }));
     }
 
     // Fallback — parse ADF body for link marks
@@ -161,22 +165,18 @@ export class NavigationService {
       const linkedPageIds = await this.graphql.getIncomingLinks(pageId);
       if (linkedPageIds.length === 0) return [];
 
-      // Fetch page details for each linked page
-      const pages: Page[] = [];
-      for (const id of linkedPageIds) {
-        try {
-          const page = await this.client.getPage(id);
-          pages.push(page);
-        } catch {
-          // Page may have been deleted or be inaccessible
-        }
-      }
-      return pages;
+      // Fetch page details in parallel
+      const results = await Promise.allSettled(
+        linkedPageIds.map(id => this.client.getPage(id))
+      );
+      return results
+        .filter((r): r is PromiseFulfilledResult<Page> => r.status === 'fulfilled')
+        .map(r => r.value);
     }
 
     // Fallback — CQL text search for the page URL (approximate)
     const page = await this.client.getPage(pageId);
-    const cql = `type = page AND text ~ "${page.title}" AND id != "${pageId}"`;
+    const cql = `type = page AND text ~ "${escapeCql(page.title)}" AND id != "${escapeCql(pageId)}"`;
     const results = await this.client.searchByCql(cql, { limit: 25 });
     return results.results.map(r => r.content);
   }
@@ -190,9 +190,9 @@ export class NavigationService {
       return { pages: [], sharedLabels: {} };
     }
 
-    // Search for pages with any of the same labels (excluding this page)
-    const labelCql = labels.map(l => `"${l}"`).join(', ');
-    const cql = `type = page AND label IN (${labelCql}) AND id != "${pageId}"`;
+    const labelCql = labels.map(l => `"${escapeCql(l)}"`).join(', ');
+    const cql = `type = page AND label IN (${labelCql}) AND id != "${escapeCql(pageId)}"`;
+
     const results = await this.client.searchByCql(cql, { limit: 25 });
 
     // Track which labels each result shares
