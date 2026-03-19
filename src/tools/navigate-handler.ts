@@ -4,7 +4,7 @@
 
 import type { ToolResponse } from '../types/index.js';
 import type { NavigationService } from '../navigation/navigation-service.js';
-import { renderPageList, renderTree, renderSearchResults } from '../rendering/markdown-renderer.js';
+import { renderPageList, renderTree } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
 
 interface NavigateArgs {
@@ -68,13 +68,13 @@ export async function handleNavigateRequest(
     }
 
     case 'backlinks': {
-      const results = await nav.getBacklinks(args.pageId);
-      if (results.totalSize === 0) {
+      const pages = await nav.getBacklinks(args.pageId);
+      if (pages.length === 0) {
         let text = 'No pages link to this page.';
         text += getNextSteps('navigate', { pageId: args.pageId });
         return { content: [{ type: 'text', text }] };
       }
-      let text = `Pages linking to ${args.pageId}:\n\n${renderSearchResults(results)}`;
+      let text = `Pages linking to ${args.pageId} (${pages.length}):\n\n${renderPageList(pages)}`;
       text += getNextSteps('navigate', { pageId: args.pageId });
       return { content: [{ type: 'text', text }] };
     }

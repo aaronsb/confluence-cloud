@@ -18,6 +18,7 @@ import {
 import { createRequire } from 'node:module';
 
 import { ConfluenceRestClient } from './client/confluence-client.js';
+import { discoverCloudId, GraphQLClient } from './client/graphql-client.js';
 import { SessionManager } from './sessions/editing-session.js';
 import { MacroRegistry } from './content/macro-registry.js';
 import { toolSchemas } from './tools/tool-schemas.js';
@@ -62,7 +63,23 @@ const client = new ConfluenceRestClient({
 
 const sessions = new SessionManager();
 const macroRegistry = new MacroRegistry();
-const navigation = new NavigationService(client);
+
+// GraphQL client — initialized async, navigation falls back to REST if unavailable
+const navigation = new NavigationService(client, null);
+
+discoverCloudId(CONFLUENCE_HOST, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN)
+  .then(cloudId => {
+    if (cloudId) {
+      const graphql = new GraphQLClient(CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN, cloudId);
+      navigation.setGraphQLClient(graphql);
+      console.error(`[confluence-cloud] GraphQL enabled (cloudId: ${cloudId})`);
+    } else {
+      console.error('[confluence-cloud] GraphQL unavailable — using REST-only mode');
+    }
+  })
+  .catch(() => {
+    console.error('[confluence-cloud] GraphQL discovery failed — using REST-only mode');
+  });
 
 // ── MCP Server ─────────────────────────────────────────────────
 
