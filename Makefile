@@ -1,4 +1,4 @@
-.PHONY: build test lint fix clean check inspect help
+.PHONY: build test lint fix clean check inspect mcpb help
 .PHONY: version-sync release-patch release-minor release-major publish-all
 
 VERSION = $(shell node -p 'require("./package.json").version')
@@ -52,16 +52,29 @@ release-major: check  ## Bump major, sync, commit, tag, push
 
 _release-commit:
 	$(eval NEW_VERSION := $(shell node -p 'require("./package.json").version'))
-	git add package.json package-lock.json server.json
+	git add package.json package-lock.json server.json mcpb/manifest.json
 	git commit -m "chore: release v$(NEW_VERSION)"
 	git tag -a "v$(NEW_VERSION)" -m "v$(NEW_VERSION)"
 	git push && git push --tags
 	@echo ""
 	@echo "Released v$(NEW_VERSION). Run 'make publish-all' to publish."
 
+# ── MCPB Bundle ─────────────────────────────────────────────────────────
+
+mcpb: build     ## Build .mcpb desktop extension bundle
+	rm -rf mcpb/server mcpb/package-lock.json
+	mkdir -p mcpb/server
+	cp -r build/* mcpb/server/
+	cp package.json mcpb/server/package.json
+	cd mcpb/server && npm install --production --ignore-scripts --silent
+	rm -f mcpb/server/package.json mcpb/server/package-lock.json
+	mcpb pack mcpb confluence-cloud-mcp.mcpb
+	@echo ""
+	@echo "Built: confluence-cloud-mcp.mcpb ($$(du -h confluence-cloud-mcp.mcpb | cut -f1))"
+
 # ── Publishing ──────────────────────────────────────────────────────────
 
-publish-all:    ## Publish to npm, MCP Registry, and GitHub Release
+publish-all: mcpb  ## Publish to npm, MCP Registry, GitHub Release, and MCPB
 	@echo ""
 	@echo "Publishing v$(VERSION) to all channels."
 	@echo "  1. npm (requires OTP or trusted publisher)"
@@ -82,7 +95,7 @@ publish-all:    ## Publish to npm, MCP Registry, and GitHub Release
 	@echo "── GitHub Release ──"
 	@read -p "Release notes (one line, or empty for default): " notes; \
 	if [ -z "$$notes" ]; then notes="Release v$(VERSION)"; fi; \
-	gh release create "v$(VERSION)" --title "v$(VERSION)" --notes "$$notes"
+	gh release create "v$(VERSION)" --title "v$(VERSION)" --notes "$$notes" confluence-cloud-mcp.mcpb
 	@echo ""
 	@echo "v$(VERSION) published to all channels."
 
