@@ -92,19 +92,19 @@ describe('handleQueueRequest', () => {
 
   it('should resolve $N.field references from prior results', async () => {
     const dispatch = vi.fn()
-      .mockResolvedValueOnce(okResponse('Session: abc-def-123\nVersion: 5'))
+      .mockResolvedValueOnce(okResponse('Scratchpad: sp-abc-def-123\nVersion: 5'))
       .mockResolvedValueOnce(okResponse('done'));
 
     await handleQueueRequest(dispatch, {
       operations: [
         { tool: 'manage_confluence_page', args: { operation: 'pull_for_editing', pageId: '999' } },
-        { tool: 'edit_confluence_content', args: { sessionHandle: '$0.sessionHandle', operation: 'list_blocks' } },
+        { tool: 'edit_confluence_content', args: { scratchpadId: '$0.scratchpadId', operation: 'view' } },
       ],
     });
 
     expect(dispatch).toHaveBeenCalledTimes(2);
     const secondCall = dispatch.mock.calls[1];
-    expect(secondCall[1].sessionHandle).toBe('abc-def-123');
+    expect(secondCall[1].scratchpadId).toBe('sp-abc-def-123');
   });
 
   it('should carry forward pageId from input args', async () => {

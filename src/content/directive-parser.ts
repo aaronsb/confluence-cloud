@@ -12,6 +12,7 @@ import type {
   CodeBlock,
   MacroBlock,
   ListBlock,
+  RawAdfBlock,
 } from './blocks.js';
 
 /**
@@ -70,10 +71,25 @@ export function parseDirectives(input: string): Block[] {
     // Inline (bodyless) directive: :::name{params}:::
     const inlineDirectiveMatch = line.match(/^:::(\w[\w-]*)\{([^}]*)\}:::$/);
     if (inlineDirectiveMatch) {
+      const macroId = inlineDirectiveMatch[1];
+      const params = parseDirectiveParams(inlineDirectiveMatch[2]);
+
+      // Special case: raw_adf sentinel → RawAdfBlock placeholder (ADR-304)
+      if (macroId === 'raw_adf' && params.hash) {
+        blocks.push({
+          type: 'raw_adf',
+          adf: {},
+          hash: params.hash,
+          id: nextId(),
+        } satisfies RawAdfBlock);
+        i++;
+        continue;
+      }
+
       blocks.push({
         type: 'macro',
-        macroId: inlineDirectiveMatch[1],
-        params: parseDirectiveParams(inlineDirectiveMatch[2]),
+        macroId,
+        params,
         id: nextId(),
       } satisfies MacroBlock);
       i++;

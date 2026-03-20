@@ -4,10 +4,10 @@
 
 import type { ConfluenceClient } from '../client/confluence-client.js';
 import { parseAdf, type AdfNode } from '../content/adf-parser.js';
-import { renderBlocks } from '../content/renderer.js';
+import { renderBlocks, renderBlocksForScratchpad } from '../content/renderer.js';
 import { renderPage } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
-import type { SessionManager } from '../sessions/editing-session.js';
+import type { ScratchpadManager } from '../sessions/scratchpad.js';
 import type { ToolResponse } from '../types/index.js';
 
 interface PageArgs {
@@ -25,20 +25,20 @@ interface PageArgs {
 
 export async function handlePageRequest(
   client: ConfluenceClient,
-  sessions: SessionManager,
+  scratchpads: ScratchpadManager,
   args: PageArgs,
 ): Promise<ToolResponse> {
   switch (args.operation) {
     case 'get':
       return handleGet(client, args);
     case 'create':
-      return handleCreate(client, args);
+      return handleCreate(scratchpads, args);
     case 'update':
       return handleUpdate(client, args);
     case 'delete':
       return handleDelete(client, args);
     case 'pull_for_editing':
-      return handlePullForEditing(client, sessions, args);
+      return handlePullForEditing(client, scratchpads, args);
     case 'move':
     case 'copy':
       return { content: [{ type: 'text', text: `Operation '${args.operation}' is not yet implemented.` }] };
@@ -82,14 +82,30 @@ async function handleGet(client: ConfluenceClient, args: PageArgs): Promise<Tool
   return { content: [{ type: 'text', text }] };
 }
 
-async function handleCreate(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+function handleCreate(scratchpads: ScratchpadManager, args: PageArgs): ToolResponse {
   if (!args.spaceId || !args.title) {
     return { content: [{ type: 'text', text: 'spaceId and title are required for create operation' }], isError: true };
   }
 
-  const page = await client.createPage(args.spaceId, args.title, undefined, args.parentId);
-  let text = `Created page successfully.\n\n${renderPage(page)}`;
-  text += getNextSteps('page_create', { pageId: page.id });
+  const scratchpadId = scratchpads.createEmpty({
+    type: 'new_page',
+    spaceId: args.spaceId,
+    title: args.title,
+    parentId: args.parentId,
+  });
+
+  const text = [
+    `Page prepared: "${args.title}"`,
+    `Scratchpad: ${scratchpadId}`,
+    '',
+    'Edit the scratchpad, then submit to create the page on Confluence.',
+    '',
+    '**Next steps:**',
+    `- Add content: \`edit_confluence_content\` — \`{"operation": "append_lines", "scratchpadId": "${scratchpadId}", "content": "..."}\``,
+    `- View buffer: \`edit_confluence_content\` — \`{"operation": "view", "scratchpadId": "${scratchpadId}"}\``,
+    `- Publish: \`edit_confluence_content\` — \`{"operation": "submit", "scratchpadId": "${scratchpadId}"}\``,
+  ].join('\n');
+
   return { content: [{ type: 'text', text }] };
 }
 
@@ -127,7 +143,7 @@ async function handleDelete(client: ConfluenceClient, args: PageArgs): Promise<T
 
 async function handlePullForEditing(
   client: ConfluenceClient,
-  sessions: SessionManager,
+  scratchpads: ScratchpadManager,
   args: PageArgs,
 ): Promise<ToolResponse> {
   if (!args.pageId) {
@@ -141,26 +157,23 @@ async function handlePullForEditing(
   }
 
   const blocks = parseAdf(page.body.atlas_doc_format as AdfNode);
-  const sessionId = sessions.create(args.pageId, page.spaceKey ?? page.spaceId, page.version.number, blocks);
+  const { text: rendered, sideTable } = renderBlocksForScratchpad(blocks);
+  const lines = rendered.split('\n');
 
-  const rendered = renderBlocks(blocks);
-  const text = [
-    `Editing session created for: ${page.title}`,
-    `Session: ${sessionId}`,
-    `Version: ${page.version.number}`,
-    `Blocks: ${blocks.length}`,
-    '',
-    '---',
-    '',
-    rendered,
-    '',
-    '---',
-    '**Next steps:**',
-    `- Edit content: \`edit_confluence_content\` — \`{"sessionHandle": "${sessionId}", "operation": "list_blocks"}\``,
-    `- Close session: \`edit_confluence_content\` — \`{"sessionHandle": "${sessionId}", "operation": "close"}\``,
-  ].join('\n');
+  const scratchpadId = scratchpads.createFromLines(
+    {
+      type: 'existing_page',
+      pageId: args.pageId,
+      version: page.version.number,
+      title: page.title,
+    },
+    lines,
+    sideTable,
+  );
 
-  return { content: [{ type: 'text', text }] };
+  const view = scratchpads.view(scratchpadId);
+
+  return { content: [{ type: 'text', text: view! }] };
 }
 
 async function handleGetVersions(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {

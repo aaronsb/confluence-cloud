@@ -1,13 +1,50 @@
 /**
  * Block Model → LLM-facing markdown renderer.
  * Converts typed blocks to readable markdown with ::: directive syntax for macros.
- * See ADR-300 and ADR-302.
+ * See ADR-300, ADR-302, and ADR-304.
  */
+
+import { createHash } from 'node:crypto';
 
 import type { Block, ListItem } from './blocks.js';
 
+export interface ScratchpadRenderResult {
+  text: string;
+  sideTable: Map<string, object>;
+}
+
 export function renderBlocks(blocks: Block[]): string {
   return blocks.map(renderBlock).join('\n\n');
+}
+
+/**
+ * Render blocks for scratchpad loading.
+ * Returns text + a side-table mapping hashes to raw ADF nodes for round-trip preservation.
+ * See ADR-304.
+ */
+export function renderBlocksForScratchpad(blocks: Block[]): ScratchpadRenderResult {
+  const sideTable = new Map<string, object>();
+  const text = blocks.map(block => renderBlockForScratchpad(block, sideTable)).join('\n\n');
+  return { text, sideTable };
+}
+
+function renderBlockForScratchpad(block: Block, sideTable: Map<string, object>): string {
+  if (block.type === 'raw_adf') {
+    const hash = hashAdf(block.adf);
+    sideTable.set(hash, block.adf);
+    return `:::raw_adf{hash="${hash}"}:::`;
+  }
+  if (block.type === 'section') {
+    const heading = `${'#'.repeat(block.level)} ${block.heading}`;
+    if (block.content.length === 0) return heading;
+    const body = block.content.map(b => renderBlockForScratchpad(b, sideTable)).join('\n\n');
+    return `${heading}\n\n${body}`;
+  }
+  return renderBlock(block);
+}
+
+function hashAdf(adf: object): string {
+  return createHash('sha256').update(JSON.stringify(adf)).digest('hex').slice(0, 16);
 }
 
 function renderBlock(block: Block): string {

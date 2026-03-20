@@ -23,7 +23,7 @@ import { ConfluenceRestClient } from './client/confluence-client.js';
 import { discoverCloudId, GraphQLClient } from './client/graphql-client.js';
 import { MacroRegistry } from './content/macro-registry.js';
 import { NavigationService } from './navigation/navigation-service.js';
-import { SessionManager } from './sessions/editing-session.js';
+import { ScratchpadManager } from './sessions/scratchpad.js';
 import { handleEditRequest } from './tools/edit-handler.js';
 import { handleMediaRequest } from './tools/media-handler.js';
 import { handleNavigateRequest } from './tools/navigate-handler.js';
@@ -69,7 +69,7 @@ const client = new ConfluenceRestClient({
   apiToken: CONFLUENCE_API_TOKEN,
 });
 
-const sessions = new SessionManager();
+const scratchpads = new ScratchpadManager();
 const macroRegistry = new MacroRegistry();
 
 // GraphQL client — initialized async, navigation falls back to REST if unavailable
@@ -113,8 +113,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 type ToolHandler = (args: any) => Promise<ToolResponse>;
 
 const toolHandlers: Record<string, ToolHandler> = {
-  manage_confluence_page: (args) => handlePageRequest(client, sessions, args),
-  edit_confluence_content: (args) => handleEditRequest(client, sessions, args),
+  manage_confluence_page: (args) => handlePageRequest(client, scratchpads, args),
+  edit_confluence_content: (args) => handleEditRequest(client, scratchpads, args),
   manage_confluence_space: (args) => handleSpaceRequest(client, args),
   search_confluence: (args) => handleSearchRequest(client, args),
   manage_confluence_media: (args) => handleMediaRequest(client, args),

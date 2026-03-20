@@ -12,7 +12,7 @@ export type OperationContext =
   | 'space_get'
   | 'search'
   | 'navigate'
-  | 'edit_sync'
+  | 'scratchpad_submit'
   | 'media_list'
   | 'media_upload';
 
@@ -73,14 +73,14 @@ const HINTS: Record<OperationContext, NextStepHint[]> = {
 
   page_create: [
     {
-      description: 'Add content to this page',
+      description: 'View the page',
       tool: 'manage_confluence_page',
-      example: { operation: 'pull_for_editing', pageId: '$pageId' },
+      example: { operation: 'get', pageId: '$pageId' },
     },
     {
-      description: 'Add labels',
+      description: 'Edit this page',
       tool: 'manage_confluence_page',
-      example: { operation: 'update', pageId: '$pageId' },
+      example: { operation: 'pull_for_editing', pageId: '$pageId' },
     },
   ],
 
@@ -157,7 +157,7 @@ const HINTS: Record<OperationContext, NextStepHint[]> = {
     },
   ],
 
-  edit_sync: [
+  scratchpad_submit: [
     {
       description: 'View the updated page',
       tool: 'manage_confluence_page',
