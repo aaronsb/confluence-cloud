@@ -220,7 +220,7 @@ async function handleSubmit(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
-    if (message.includes('409') || message.includes('version')) {
+    if (message.includes('409') || message.includes('Version conflict')) {
       return {
         content: [{
           type: 'text',
