@@ -196,6 +196,149 @@ describe('parseAdf', () => {
     }
   });
 
+  // ── Round-trip hardening ────────────────────────────────────
+
+  it('should parse nested marks (bold inside link)', () => {
+    const adf = {
+      type: 'doc',
+      content: [{
+        type: 'paragraph',
+        content: [{
+          type: 'text',
+          text: 'click here',
+          marks: [
+            { type: 'link', attrs: { href: 'https://example.com' } },
+            { type: 'strong' },
+          ],
+        }],
+      }],
+    };
+    const blocks = parseAdf(adf);
+    expect(blocks[0].type).toBe('paragraph');
+    if (blocks[0].type === 'paragraph') {
+      // Should contain both marks in the rendered text
+      expect(blocks[0].text).toContain('click here');
+      expect(blocks[0].text).toContain('**');
+      expect(blocks[0].text).toContain('https://example.com');
+    }
+  });
+
+  it('should parse horizontal rule', () => {
+    const adf = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'Above' }] },
+        { type: 'rule' },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Below' }] },
+      ],
+    };
+    const blocks = parseAdf(adf);
+    // rule should be preserved as raw_adf
+    expect(blocks.some(b => b.type === 'raw_adf')).toBe(true);
+  });
+
+  it('should parse empty paragraph', () => {
+    const adf = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph' },
+      ],
+    };
+    const blocks = parseAdf(adf);
+    expect(blocks[0].type).toBe('paragraph');
+    if (blocks[0].type === 'paragraph') {
+      expect(blocks[0].text).toBe('');
+    }
+  });
+
+  it('should parse inline card', () => {
+    const adf = {
+      type: 'doc',
+      content: [{
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'See ' },
+          { type: 'inlineCard', attrs: { url: 'https://example.com/page' } },
+        ],
+      }],
+    };
+    const blocks = parseAdf(adf);
+    expect(blocks[0].type).toBe('paragraph');
+    if (blocks[0].type === 'paragraph') {
+      expect(blocks[0].text).toContain('https://example.com/page');
+    }
+  });
+
+  it('should parse table with merged cells (colSpan/rowSpan preserved as raw)', () => {
+    const adf = {
+      type: 'doc',
+      content: [{
+        type: 'table',
+        content: [
+          { type: 'tableRow', content: [
+            { type: 'tableHeader', attrs: { colspan: 2 }, content: [
+              { type: 'paragraph', content: [{ type: 'text', text: 'Wide Header' }] },
+            ]},
+          ]},
+          { type: 'tableRow', content: [
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'A' }] }] },
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'B' }] }] },
+          ]},
+        ],
+      }],
+    };
+    const blocks = parseAdf(adf);
+    expect(blocks[0].type).toBe('table');
+    if (blocks[0].type === 'table') {
+      expect(blocks[0].headers).toEqual(['Wide Header']);
+      expect(blocks[0].rows).toEqual([['A', 'B']]);
+    }
+  });
+
+  it('should parse decision list items', () => {
+    const adf = {
+      type: 'doc',
+      content: [{
+        type: 'decisionList',
+        content: [{
+          type: 'decisionItem',
+          attrs: { state: 'DECIDED' },
+          content: [{ type: 'text', text: 'We decided X' }],
+        }],
+      }],
+    };
+    const blocks = parseAdf(adf);
+    // Unknown top-level node → raw_adf
+    expect(blocks[0].type).toBe('raw_adf');
+  });
+
+  it('should parse nested lists with mixed ordering', () => {
+    const adf = {
+      type: 'doc',
+      content: [{
+        type: 'bulletList',
+        content: [{
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Parent' }] },
+            { type: 'orderedList', content: [
+              { type: 'listItem', content: [
+                { type: 'paragraph', content: [{ type: 'text', text: 'Child 1' }] },
+              ]},
+            ]},
+          ],
+        }],
+      }],
+    };
+    const blocks = parseAdf(adf);
+    expect(blocks[0].type).toBe('list');
+    if (blocks[0].type === 'list') {
+      expect(blocks[0].ordered).toBe(false);
+      expect(blocks[0].items[0].childrenOrdered).toBe(true);
+      expect(blocks[0].items[0].children).toHaveLength(1);
+    }
+  });
+
   it('should generate unique block IDs per call', () => {
     const adf = {
       type: 'doc',

@@ -66,12 +66,13 @@ const macroRegistry = new MacroRegistry();
 
 // GraphQL client — initialized async, navigation falls back to REST if unavailable
 const navigation = new NavigationService(client, null);
+let graphqlClient: GraphQLClient | null = null;
 
 discoverCloudId(CONFLUENCE_HOST, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN)
   .then(cloudId => {
     if (cloudId) {
-      const graphql = new GraphQLClient(CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN, cloudId);
-      navigation.setGraphQLClient(graphql);
+      graphqlClient = new GraphQLClient(CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN, cloudId);
+      navigation.setGraphQLClient(graphqlClient);
       console.error(`[confluence-cloud] GraphQL enabled (cloudId: ${cloudId})`);
     } else {
       console.error('[confluence-cloud] GraphQL unavailable — using REST-only mode');
@@ -109,7 +110,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   manage_confluence_space: (args) => handleSpaceRequest(client, args),
   search_confluence: (args) => handleSearchRequest(client, args),
   manage_confluence_media: (args) => handleMediaRequest(client, args),
-  navigate_confluence: (args) => handleNavigateRequest(navigation, args),
+  navigate_confluence: (args) => handleNavigateRequest(navigation, args, graphqlClient, client),
   queue_confluence_operations: (args) =>
     handleQueueRequest(
       async (toolName, toolArgs) => {
@@ -155,6 +156,18 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => ({
       description: 'Confluence macro registry with parameter schemas and usage examples',
       mimeType: 'text/markdown',
     },
+    {
+      uri: 'confluence://instance/summary',
+      name: 'Instance Summary',
+      description: 'Confluence instance overview: available spaces, GraphQL status',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'confluence://tools/documentation',
+      name: 'Tool Documentation',
+      description: 'Complete documentation for all Confluence MCP tools with operations and examples',
+      mimeType: 'text/markdown',
+    },
   ],
 }));
 
@@ -191,6 +204,52 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     };
   }
 
+  if (uri === 'confluence://instance/summary') {
+    const spacesResult = await client.listSpaces({ limit: 250 });
+    const globalSpaces = spacesResult.results.filter(s => s.type === 'global');
+    const personalSpaces = spacesResult.results.filter(s => s.type === 'personal');
+
+    const lines = [
+      '# Confluence Instance Summary',
+      '',
+      `Host: ${CONFLUENCE_HOST}`,
+      `GraphQL: ${graphqlClient ? 'enabled' : 'unavailable (REST-only mode)'}`,
+      '',
+      `## Spaces (${spacesResult.results.length} total)`,
+      '',
+      `Global spaces: ${globalSpaces.length}`,
+      `Personal spaces: ${personalSpaces.length}`,
+      '',
+      '### Global Spaces',
+      '',
+      ...globalSpaces.map(s => `- **${s.name}** (${s.key}) — ${s.status}`),
+      '',
+      '### Personal Spaces',
+      '',
+      ...personalSpaces.map(s => `- **${s.name}** (${s.key}) — ${s.status}`),
+    ];
+
+    return {
+      contents: [{
+        uri,
+        mimeType: 'text/markdown',
+        text: lines.join('\n'),
+      }],
+    };
+  }
+
+  if (uri === 'confluence://tools/documentation') {
+    const { renderToolDocumentation } = await import('./rendering/markdown-renderer.js');
+    const docs = renderToolDocumentation(toolSchemas);
+    return {
+      contents: [{
+        uri,
+        mimeType: 'text/markdown',
+        text: docs,
+      }],
+    };
+  }
+
   return {
     contents: [{
       uri,
@@ -199,6 +258,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     }],
   };
 });
+
 
 // ── Start Server ───────────────────────────────────────────────
 

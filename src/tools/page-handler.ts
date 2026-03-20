@@ -17,6 +17,10 @@ interface PageArgs {
   title?: string;
   parentId?: string;
   expand?: string[];
+  labels?: string[];
+  label?: string;
+  propertyKey?: string;
+  propertyValue?: Record<string, unknown>;
 }
 
 export async function handlePageRequest(
@@ -40,6 +44,20 @@ export async function handlePageRequest(
       return { content: [{ type: 'text', text: `Operation '${args.operation}' is not yet implemented.` }] };
     case 'get_versions':
       return handleGetVersions(client, args);
+    case 'get_labels':
+      return handleGetLabels(client, args);
+    case 'add_labels':
+      return handleAddLabels(client, args);
+    case 'remove_label':
+      return handleRemoveLabel(client, args);
+    case 'get_properties':
+      return handleGetProperties(client, args);
+    case 'get_property':
+      return handleGetProperty(client, args);
+    case 'set_property':
+      return handleSetProperty(client, args);
+    case 'delete_property':
+      return handleDeleteProperty(client, args);
     default:
       return { content: [{ type: 'text', text: `Unknown operation: ${args.operation}` }], isError: true };
   }
@@ -154,4 +172,99 @@ async function handleGetVersions(client: ConfluenceClient, args: PageArgs): Prom
   const page = await client.getPage(args.pageId);
   const text = `Current version: ${page.version.number}\n\nFull version history not yet implemented.`;
   return { content: [{ type: 'text', text }] };
+}
+
+// ── Labels ──────────────────────────────────────────────────
+
+async function handleGetLabels(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for get_labels' }], isError: true };
+  }
+  const labels = await client.getLabels(args.pageId);
+  const text = labels.length > 0
+    ? `Labels on page ${args.pageId}: ${labels.join(', ')}`
+    : `No labels on page ${args.pageId}.`;
+  return { content: [{ type: 'text', text: text + getNextSteps('page_get', { pageId: args.pageId }) }] };
+}
+
+async function handleAddLabels(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for add_labels' }], isError: true };
+  }
+  if (!args.labels || args.labels.length === 0) {
+    return { content: [{ type: 'text', text: 'labels array is required for add_labels' }], isError: true };
+  }
+  await client.addLabels(args.pageId, args.labels);
+  const text = `Added ${args.labels.length} label(s) to page ${args.pageId}: ${args.labels.join(', ')}`;
+  return { content: [{ type: 'text', text: text + getNextSteps('page_update', { pageId: args.pageId }) }] };
+}
+
+async function handleRemoveLabel(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for remove_label' }], isError: true };
+  }
+  if (!args.label) {
+    return { content: [{ type: 'text', text: 'label is required for remove_label' }], isError: true };
+  }
+  await client.removeLabel(args.pageId, args.label);
+  const text = `Removed label "${args.label}" from page ${args.pageId}.`;
+  return { content: [{ type: 'text', text: text + getNextSteps('page_update', { pageId: args.pageId }) }] };
+}
+
+// ── Content Properties ──────────────────────────────────────
+
+async function handleGetProperties(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for get_properties' }], isError: true };
+  }
+  const props = await client.getProperties(args.pageId);
+  if (props.length === 0) {
+    return { content: [{ type: 'text', text: `No content properties on page ${args.pageId}.` }] };
+  }
+  const lines = [
+    `Content properties on page ${args.pageId}:`,
+    '',
+    '| Key | Value | Version |',
+    '|-----|-------|---------|',
+    ...props.map(p => `| ${p.key} | ${JSON.stringify(p.value)} | v${p.version.number} |`),
+  ];
+  return { content: [{ type: 'text', text: lines.join('\n') }] };
+}
+
+async function handleGetProperty(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for get_property' }], isError: true };
+  }
+  if (!args.propertyKey) {
+    return { content: [{ type: 'text', text: 'propertyKey is required for get_property' }], isError: true };
+  }
+  const prop = await client.getProperty(args.pageId, args.propertyKey);
+  const text = `Property "${prop.key}" on page ${args.pageId}:\n\n\`\`\`json\n${JSON.stringify(prop.value, null, 2)}\n\`\`\`\n\nVersion: ${prop.version.number}`;
+  return { content: [{ type: 'text', text }] };
+}
+
+async function handleSetProperty(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for set_property' }], isError: true };
+  }
+  if (!args.propertyKey) {
+    return { content: [{ type: 'text', text: 'propertyKey is required for set_property' }], isError: true };
+  }
+  if (!args.propertyValue || typeof args.propertyValue !== 'object') {
+    return { content: [{ type: 'text', text: 'propertyValue (object) is required for set_property' }], isError: true };
+  }
+  const prop = await client.setProperty(args.pageId, args.propertyKey, args.propertyValue);
+  const text = `Set property "${prop.key}" on page ${args.pageId} (v${prop.version.number}).\n\n\`\`\`json\n${JSON.stringify(prop.value, null, 2)}\n\`\`\``;
+  return { content: [{ type: 'text', text }] };
+}
+
+async function handleDeleteProperty(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for delete_property' }], isError: true };
+  }
+  if (!args.propertyKey) {
+    return { content: [{ type: 'text', text: 'propertyKey is required for delete_property' }], isError: true };
+  }
+  await client.deleteProperty(args.pageId, args.propertyKey);
+  return { content: [{ type: 'text', text: `Deleted property "${args.propertyKey}" from page ${args.pageId}.` }] };
 }

@@ -95,6 +95,14 @@ export interface SearchResultItem {
   url: string;
 }
 
+// ── Content Properties ────────────────────────────────────────
+
+export interface ContentProperty {
+  key: string;
+  value: Record<string, unknown>;
+  version: { number: number; createdAt?: string };
+}
+
 // ── Pagination ─────────────────────────────────────────────────
 
 export interface PaginationOptions {

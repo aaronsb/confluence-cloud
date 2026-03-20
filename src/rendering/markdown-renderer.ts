@@ -137,3 +137,50 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
+
+// ── Tool Documentation ────────────────────────────────────────
+
+import type { ToolSchema } from '../tools/tool-schemas.js';
+
+export function renderToolDocumentation(schemas: Record<string, ToolSchema>): string {
+  const lines: string[] = ['# Confluence Cloud MCP — Tool Documentation', ''];
+
+  for (const schema of Object.values(schemas)) {
+    lines.push(`## ${schema.name}`);
+    lines.push('');
+    lines.push(schema.description);
+    lines.push('');
+
+    const props = schema.inputSchema.properties as Record<string, Record<string, unknown>> | undefined;
+    if (props) {
+      const opProp = props.operation;
+      if (opProp && Array.isArray(opProp.enum)) {
+        lines.push(`**Operations:** ${(opProp.enum as string[]).map(o => `\`${o}\``).join(', ')}`);
+        lines.push('');
+      }
+
+      lines.push('**Parameters:**');
+      lines.push('');
+      lines.push('| Parameter | Type | Description |');
+      lines.push('|-----------|------|-------------|');
+      for (const [name, prop] of Object.entries(props)) {
+        if (name === 'operation') continue;
+        const type = prop.type as string ?? 'any';
+        const desc = prop.description as string ?? '';
+        lines.push(`| \`${name}\` | ${type} | ${desc} |`);
+      }
+      lines.push('');
+    }
+
+    const required = schema.inputSchema.required as string[] | undefined;
+    if (required && required.length > 0) {
+      lines.push(`**Required:** ${required.map(r => `\`${r}\``).join(', ')}`);
+      lines.push('');
+    }
+
+    lines.push('---');
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}

@@ -242,8 +242,8 @@ function parseInlineText(text: string): AdfNode[] {
   if (!text) return [];
 
   const nodes: AdfNode[] = [];
-  // Regex for inline marks — ordered by specificity
-  const pattern = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|~~(.+?)~~|\[([^\]]+)\]\(([^)]+)\))/g;
+  // Regex for inline marks and inline directives — ordered by specificity
+  const pattern = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|~~(.+?)~~|\[([^\]]+)\]\(([^)]+)\)|:::status\{([^}]*)\}:::)/g;
 
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -274,6 +274,15 @@ function parseInlineText(text: string): AdfNode[] {
         type: 'text',
         text: match[6],
         marks: isSafe ? [{ type: 'link', attrs: { href } }] : [],
+      });
+    } else if (match[8] !== undefined) {
+      // :::status{color="..." title="..."}::: → native status node
+      const paramsStr = match[8];
+      const color = paramsStr.match(/color="([^"]*)"/)?.[1] ?? 'grey';
+      const title = paramsStr.match(/title="([^"]*)"/)?.[1] ?? '';
+      nodes.push({
+        type: 'status',
+        attrs: { text: title, color, style: 'bold' },
       });
     }
 
