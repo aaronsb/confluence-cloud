@@ -194,9 +194,7 @@ async function handleAddLabels(client: ConfluenceClient, args: PageArgs): Promis
   if (!args.labels || args.labels.length === 0) {
     return { content: [{ type: 'text', text: 'labels array is required for add_labels' }], isError: true };
   }
-  for (const label of args.labels) {
-    await client.addLabel(args.pageId, label);
-  }
+  await client.addLabels(args.pageId, args.labels);
   const text = `Added ${args.labels.length} label(s) to page ${args.pageId}: ${args.labels.join(', ')}`;
   return { content: [{ type: 'text', text: text + getNextSteps('page_update', { pageId: args.pageId }) }] };
 }

@@ -42,6 +42,7 @@ export interface ConfluenceClient {
   // Labels
   getLabels(pageId: string): Promise<string[]>;
   addLabel(pageId: string, label: string): Promise<void>;
+  addLabels(pageId: string, labels: string[]): Promise<void>;
   removeLabel(pageId: string, label: string): Promise<void>;
 
   // Content Properties
@@ -281,14 +282,18 @@ export class ConfluenceRestClient implements ConfluenceClient {
   }
 
   async addLabel(pageId: string, label: string): Promise<void> {
+    await this.addLabels(pageId, [label]);
+  }
+
+  async addLabels(pageId: string, labels: string[]): Promise<void> {
     await this.request(`/pages/${pageId}/labels`, {
       method: 'POST',
-      body: JSON.stringify([{ prefix: 'global', name: label }]),
+      body: JSON.stringify(labels.map(name => ({ prefix: 'global', name }))),
     });
   }
 
   async removeLabel(pageId: string, label: string): Promise<void> {
-    await this.request(`/pages/${pageId}/labels/${label}`, { method: 'DELETE' });
+    await this.request(`/pages/${pageId}/labels/${encodeURIComponent(label)}`, { method: 'DELETE' });
   }
 
   // ── Content Properties ──────────────────────────────────────
@@ -302,19 +307,21 @@ export class ConfluenceRestClient implements ConfluenceClient {
 
   async getProperty(pageId: string, key: string): Promise<ContentProperty> {
     const raw = await this.request<ConfluenceV2ContentProperty>(
-      `/pages/${pageId}/properties/${key}`,
+      `/pages/${pageId}/properties/${encodeURIComponent(key)}`,
     );
     return mapContentProperty(raw);
   }
 
   async setProperty(pageId: string, key: string, value: Record<string, unknown>): Promise<ContentProperty> {
-    // Upsert: try to get existing property for version, then PUT; if not found, POST to create
+    // Upsert: try to get existing property for version, then PUT; if not found, POST to create.
+    // Note: GET-then-PUT has a small race window for concurrent edits — acceptable per ADR-501.
+    const encodedKey = encodeURIComponent(key);
     try {
       const existing = await this.request<ConfluenceV2ContentProperty>(
-        `/pages/${pageId}/properties/${key}`,
+        `/pages/${pageId}/properties/${encodedKey}`,
       );
       const raw = await this.request<ConfluenceV2ContentProperty>(
-        `/pages/${pageId}/properties/${key}`,
+        `/pages/${pageId}/properties/${encodedKey}`,
         {
           method: 'PUT',
           body: JSON.stringify({
@@ -342,7 +349,7 @@ export class ConfluenceRestClient implements ConfluenceClient {
   }
 
   async deleteProperty(pageId: string, key: string): Promise<void> {
-    await this.request(`/pages/${pageId}/properties/${key}`, { method: 'DELETE' });
+    await this.request(`/pages/${pageId}/properties/${encodeURIComponent(key)}`, { method: 'DELETE' });
   }
 }
 

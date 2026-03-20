@@ -2,6 +2,7 @@
  * Handler for navigate_confluence tool.
  */
 
+import type { ConfluenceClient } from '../client/confluence-client.js';
 import type { ToolResponse } from '../types/index.js';
 import type { NavigationService } from '../navigation/navigation-service.js';
 import type { GraphQLClient } from '../client/graphql-client.js';
@@ -20,6 +21,7 @@ export async function handleNavigateRequest(
   nav: NavigationService,
   args: NavigateArgs,
   graphql?: GraphQLClient | null,
+  client?: ConfluenceClient | null,
 ): Promise<ToolResponse> {
 
   switch (args.operation) {
@@ -94,7 +96,7 @@ export async function handleNavigateRequest(
     }
 
     case 'discover_metadata': {
-      return handleDiscoverMetadata(graphql, args.pageId);
+      return handleDiscoverMetadata(graphql, client, args.pageId);
     }
 
     default:
@@ -104,6 +106,7 @@ export async function handleNavigateRequest(
 
 async function handleDiscoverMetadata(
   graphql: GraphQLClient | null | undefined,
+  client: ConfluenceClient | null | undefined,
   pageId?: string,
 ): Promise<ToolResponse> {
   if (!graphql) {
@@ -182,6 +185,36 @@ async function handleDiscoverMetadata(
     '- Labels: `get_labels`, `add_labels`, `remove_label`',
     '- Properties: `get_properties`, `get_property`, `set_property`, `delete_property`',
   ];
+
+  // If pageId provided and client available, fetch actual metadata for this page
+  if (pageId && client) {
+    lines.push('');
+    lines.push(`## Page ${pageId} — Current Metadata`);
+    lines.push('');
+    try {
+      const labels = await client.getLabels(pageId);
+      lines.push(`**Labels:** ${labels.length > 0 ? labels.join(', ') : '(none)'}`);
+    } catch {
+      lines.push('**Labels:** (could not fetch)');
+    }
+    try {
+      const props = await client.getProperties(pageId);
+      if (props.length > 0) {
+        lines.push('');
+        lines.push('**Content Properties:**');
+        lines.push('');
+        lines.push('| Key | Value | Version |');
+        lines.push('|-----|-------|---------|');
+        for (const p of props) {
+          lines.push(`| ${p.key} | ${JSON.stringify(p.value)} | v${p.version.number} |`);
+        }
+      } else {
+        lines.push('**Content Properties:** (none)');
+      }
+    } catch {
+      lines.push('**Content Properties:** (could not fetch)');
+    }
+  }
 
   return { content: [{ type: 'text', text: lines.join('\n') }] };
 }
