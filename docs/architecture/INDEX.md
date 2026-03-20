@@ -52,3 +52,4 @@ _Batching, queuing, field discovery, rendering facades_
 | ADR | Title | Status |
 |-----|-------|--------|
 | [ADR-500](./operations/ADR-500-rendering-facades-and-semantic-hinting.md) | Rendering Facades and Semantic Hinting | Draft |
+| [ADR-501](./operations/ADR-501-page-metadata-labels-and-content-properties.md) | Page Metadata — Labels and Content Properties | Draft |
