@@ -36,7 +36,12 @@ import type { ToolResponse } from './types/index.js';
 
 const CONFLUENCE_EMAIL = process.env.CONFLUENCE_EMAIL;
 const CONFLUENCE_API_TOKEN = process.env.CONFLUENCE_API_TOKEN;
-const CONFLUENCE_HOST = process.env.CONFLUENCE_HOST;
+
+// Normalize host: ensure https:// prefix, strip trailing slashes
+const rawHost = process.env.CONFLUENCE_HOST?.trim();
+const CONFLUENCE_HOST = rawHost
+  ? (rawHost.startsWith('http') ? rawHost : `https://${rawHost}`).replace(/\/+$/, '')
+  : undefined;
 
 if (!CONFLUENCE_EMAIL || !CONFLUENCE_API_TOKEN || !CONFLUENCE_HOST) {
   console.error(
@@ -51,7 +56,8 @@ if (!CONFLUENCE_EMAIL || !CONFLUENCE_API_TOKEN || !CONFLUENCE_HOST) {
 // ── Read version from package.json ─────────────────────────────
 
 const require = createRequire(import.meta.url);
-const pkg = require('../package.json') as { version: string };
+let version = '0.0.0';
+try { version = (require('../package.json') as { version: string }).version; } catch { /* MCPB bundle — version unavailable */ }
 
 // ── Initialize services ────────────────────────────────────────
 
@@ -85,7 +91,7 @@ discoverCloudId(CONFLUENCE_HOST, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN)
 // ── MCP Server ─────────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'confluence-cloud-mcp', version: pkg.version },
+  { name: 'confluence-cloud-mcp', version: version },
   { capabilities: { tools: {}, resources: {} } },
 );
 
@@ -265,7 +271,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`Confluence Cloud MCP server v${pkg.version} running on stdio`);
+  console.error(`Confluence Cloud MCP server v${version} running on stdio`);
 }
 
 main().catch((error) => {

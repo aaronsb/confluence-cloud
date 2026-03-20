@@ -28,8 +28,8 @@ inspect:        ## Launch MCP Inspector
 
 # ── Version & Release ───────────────────────────────────────────────────
 
-version-sync:   ## Sync version from package.json to server.json
-	@echo "Syncing version $(VERSION) to server.json"
+version-sync:   ## Sync version from package.json to server.json and mcpb/manifest.json
+	@echo "Syncing version $(VERSION) to server.json and mcpb/manifest.json"
 	node scripts/version-sync.cjs
 
 release-patch: check  ## Bump patch, sync, commit, tag, push
@@ -67,7 +67,7 @@ mcpb: build     ## Build .mcpb desktop extension bundle
 	cp -r build/* mcpb/server/
 	cp package.json mcpb/server/package.json
 	cd mcpb/server && npm install --production --ignore-scripts --silent
-	rm -f mcpb/server/package.json mcpb/server/package-lock.json
+	rm -f mcpb/server/package-lock.json
 	mcpb pack mcpb confluence-cloud-mcp.mcpb
 	@echo ""
 	@echo "Built: confluence-cloud-mcp.mcpb ($$(du -h confluence-cloud-mcp.mcpb | cut -f1))"
