@@ -39,6 +39,7 @@ _ADF handling, macro blocks, editing sessions, round-trip fidelity_
 | [ADR-301](./content/ADR-301-session-based-editing-with-delta-sync.md) | Session-Based Editing with Delta Sync | Draft |
 | [ADR-302](./content/ADR-302-confluence-macro-block-handling.md) | Confluence Macro Block Handling | Draft |
 | [ADR-303](./content/ADR-303-visual-content-pipeline-image-attachments-and-macro-detection.md) | Visual Content Pipeline — Image Attachments and Macro Detection | Draft |
+| [ADR-304](./content/ADR-304-scratchpad-buffer-line-addressed-content-authoring.md) | Scratchpad Buffer — Line-Addressed Content Authoring | Draft |
 
 ## Navigation
 _Page hierarchy, link graph, search, progressive disclosure_

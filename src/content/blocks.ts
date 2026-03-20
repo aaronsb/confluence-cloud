@@ -88,17 +88,7 @@ export interface RawAdfBlock {
   type: 'raw_adf';
   adf: object;
   hint?: string;
+  hash?: string;
   id?: string;
 }
 
-// ── Session Block (extends Block with change tracking) ─────────
-// See ADR-301: Session-Based Editing with Delta Sync.
-
-export type SessionBlockState = 'unchanged' | 'modified' | 'inserted' | 'deleted';
-
-export interface SessionBlock {
-  block: Block;
-  id: string;
-  hash: string;
-  state: SessionBlockState;
-}

@@ -1,347 +1,296 @@
 /**
  * Handler for edit_confluence_content tool.
- * See ADR-301: Session-Based Editing with Delta Sync.
+ * See ADR-304: Scratchpad Buffer — Line-Addressed Content Authoring.
  */
 
 import type { ConfluenceClient } from '../client/confluence-client.js';
 import { serializeBlocks } from '../content/adf-serializer.js';
 import type { Block } from '../content/blocks.js';
 import { parseDirectives } from '../content/directive-parser.js';
-import { renderBlocks } from '../content/renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
-import type { SessionManager } from '../sessions/editing-session.js';
+import type { ScratchpadManager } from '../sessions/scratchpad.js';
 import type { ToolResponse } from '../types/index.js';
 
 interface EditArgs {
   operation: string;
-  sessionHandle: string;
-  blockId?: string;
-  section?: string;
+  scratchpadId?: string;
+  afterLine?: number;
+  startLine?: number;
+  endLine?: number;
   content?: string;
-  position?: number;
-  searchText?: string;
-  replaceText?: string;
   message?: string;
 }
 
 export async function handleEditRequest(
   client: ConfluenceClient,
-  sessions: SessionManager,
+  scratchpads: ScratchpadManager,
   args: EditArgs,
 ): Promise<ToolResponse> {
-  const session = sessions.get(args.sessionHandle);
-  if (!session) {
+  // List doesn't require a scratchpadId
+  if (args.operation === 'list') {
+    return handleList(scratchpads);
+  }
+
+  if (!args.scratchpadId) {
     return {
-      content: [{ type: 'text', text: 'Session not found or expired. Use pull_for_editing to start a new session.' }],
+      content: [{ type: 'text', text: 'scratchpadId is required. Use manage_confluence_page create or pull_for_editing to get one.' }],
+      isError: true,
+    };
+  }
+
+  const sp = scratchpads.get(args.scratchpadId);
+  if (!sp) {
+    return {
+      content: [{ type: 'text', text: 'Scratchpad not found or expired. Use manage_confluence_page create or pull_for_editing to start a new one.' }],
       isError: true,
     };
   }
 
   switch (args.operation) {
-    case 'list_blocks':
-      return handleListBlocks(sessions, args.sessionHandle, session);
+    case 'view':
+      return handleView(scratchpads, args);
 
-    case 'patch_section':
-      return handlePatchSection(sessions, args);
+    case 'insert_lines':
+      return handleInsertLines(scratchpads, args);
 
-    case 'patch_block':
-      return handlePatchBlock(sessions, args);
+    case 'append_lines':
+      return handleAppendLines(scratchpads, args);
 
-    case 'append':
-      return handleAppend(sessions, args);
+    case 'replace_lines':
+      return handleReplaceLines(scratchpads, args);
 
-    case 'replace':
-      return handleReplace(sessions, args);
+    case 'remove_lines':
+      return handleRemoveLines(scratchpads, args);
 
-    case 'window_edit':
-      return handleWindowEdit(sessions, args);
+    case 'submit':
+      return handleSubmit(client, scratchpads, args);
 
-    case 'sync':
-      return handleSync(client, sessions, args);
-
-    case 'close':
-      return handleClose(sessions, args);
+    case 'discard':
+      return handleDiscard(scratchpads, args);
 
     default:
-      return { content: [{ type: 'text', text: `Unknown edit operation: ${args.operation}` }], isError: true };
+      return { content: [{ type: 'text', text: `Unknown operation: ${args.operation}` }], isError: true };
   }
 }
 
-// ── List Blocks ────────────────────────────────────────────────
+// ── View ───────────────────────────────────────────────────
 
-function handleListBlocks(
-  sessions: SessionManager,
-  sessionHandle: string,
-  session: { sessionId: string; pageId: string; status: string; blocks: Array<{ id: string; block: Block; state: string }> },
-): ToolResponse {
-  const blocks = sessions.getCurrentBlocks(sessionHandle);
-  const rendered = renderBlocks(blocks);
-  const blockSummary = session.blocks
-    .filter(b => b.state !== 'deleted')
-    .map((b, i) => `  [${i}] ${b.id} (${b.block.type}) ${b.state !== 'unchanged' ? `[${b.state}]` : ''}`.trimEnd())
-    .join('\n');
-
-  return {
-    content: [{
-      type: 'text',
-      text: `Session: ${session.sessionId} | Page: ${session.pageId} | Status: ${session.status}\n\nBlocks:\n${blockSummary}\n\n---\n\n${rendered}`,
-    }],
-  };
+function handleView(scratchpads: ScratchpadManager, args: EditArgs): ToolResponse {
+  const result = scratchpads.view(args.scratchpadId!, args.startLine, args.endLine);
+  if (!result) {
+    return { content: [{ type: 'text', text: 'Scratchpad not found.' }], isError: true };
+  }
+  return { content: [{ type: 'text', text: result }] };
 }
 
-// ── Patch Section ──────────────────────────────────────────────
+// ── Insert Lines ───────────────────────────────────────────
 
-function handlePatchSection(sessions: SessionManager, args: EditArgs): ToolResponse {
-  if (!args.section) {
-    return { content: [{ type: 'text', text: 'section heading is required for patch_section' }], isError: true };
+function handleInsertLines(scratchpads: ScratchpadManager, args: EditArgs): ToolResponse {
+  if (args.afterLine === undefined) {
+    return { content: [{ type: 'text', text: 'afterLine is required for insert_lines.' }], isError: true };
   }
-  if (!args.content) {
-    return { content: [{ type: 'text', text: 'content is required for patch_section' }], isError: true };
-  }
-
-  const session = sessions.get(args.sessionHandle)!;
-  const sectionBlock = session.blocks.find(
-    b => b.block.type === 'section' && b.block.heading.toLowerCase() === args.section!.toLowerCase()
-  );
-
-  if (!sectionBlock) {
-    return { content: [{ type: 'text', text: `Section '${args.section}' not found.` }], isError: true };
+  if (args.content === undefined) {
+    return { content: [{ type: 'text', text: 'content is required for insert_lines.' }], isError: true };
   }
 
-  const newContent = parseDirectives(args.content);
-  const updatedSection: Block = {
-    ...sectionBlock.block,
-    type: 'section',
-    content: newContent,
-  } as Block;
+  const result = scratchpads.insertLines(args.scratchpadId!, args.afterLine, args.content);
+  if (!result) {
+    return { content: [{ type: 'text', text: 'Scratchpad not found.' }], isError: true };
+  }
 
-  sessions.updateBlock(args.sessionHandle, sectionBlock.id, updatedSection);
-
-  return {
-    content: [{
-      type: 'text',
-      text: `Updated section '${args.section}' with ${newContent.length} block(s).\n\n${renderBlocks([updatedSection])}`,
-    }],
-  };
+  return { content: [{ type: 'text', text: formatMutationResponse(result) }] };
 }
 
-// ── Patch Block ────────────────────────────────────────────────
+// ── Append Lines ───────────────────────────────────────────
 
-function handlePatchBlock(sessions: SessionManager, args: EditArgs): ToolResponse {
-  if (!args.blockId) {
-    return { content: [{ type: 'text', text: 'blockId is required for patch_block' }], isError: true };
-  }
-  if (!args.content) {
-    return { content: [{ type: 'text', text: 'content is required for patch_block' }], isError: true };
+function handleAppendLines(scratchpads: ScratchpadManager, args: EditArgs): ToolResponse {
+  if (args.content === undefined) {
+    return { content: [{ type: 'text', text: 'content is required for append_lines.' }], isError: true };
   }
 
-  const parsed = parseDirectives(args.content);
-  if (parsed.length === 0) {
-    return { content: [{ type: 'text', text: 'content parsed to zero blocks.' }], isError: true };
+  const result = scratchpads.appendLines(args.scratchpadId!, args.content);
+  if (!result) {
+    return { content: [{ type: 'text', text: 'Scratchpad not found.' }], isError: true };
   }
 
-  const newBlock = parsed[0];
-  const success = sessions.updateBlock(args.sessionHandle, args.blockId, newBlock);
-
-  if (!success) {
-    return { content: [{ type: 'text', text: `Block '${args.blockId}' not found.` }], isError: true };
-  }
-
-  return {
-    content: [{
-      type: 'text',
-      text: `Updated block ${args.blockId}.\n\n${renderBlocks([newBlock])}`,
-    }],
-  };
+  return { content: [{ type: 'text', text: formatMutationResponse(result) }] };
 }
 
-// ── Append ─────────────────────────────────────────────────────
+// ── Replace Lines ──────────────────────────────────────────
 
-function handleAppend(sessions: SessionManager, args: EditArgs): ToolResponse {
-  if (!args.content) {
-    return { content: [{ type: 'text', text: 'content is required for append' }], isError: true };
+function handleReplaceLines(scratchpads: ScratchpadManager, args: EditArgs): ToolResponse {
+  if (args.startLine === undefined || args.endLine === undefined) {
+    return { content: [{ type: 'text', text: 'startLine and endLine are required for replace_lines.' }], isError: true };
+  }
+  if (args.content === undefined) {
+    return { content: [{ type: 'text', text: 'content is required for replace_lines.' }], isError: true };
   }
 
-  const newBlocks = parseDirectives(args.content);
-  const session = sessions.get(args.sessionHandle)!;
-  const position = args.position ?? session.blocks.length;
-
-  const insertedIds: string[] = [];
-  for (let i = 0; i < newBlocks.length; i++) {
-    const id = sessions.insertBlock(args.sessionHandle, position + i, newBlocks[i]);
-    if (id) insertedIds.push(id);
+  const result = scratchpads.replaceLines(args.scratchpadId!, args.startLine, args.endLine, args.content);
+  if (!result) {
+    return { content: [{ type: 'text', text: 'Scratchpad not found.' }], isError: true };
   }
 
-  return {
-    content: [{
-      type: 'text',
-      text: `Appended ${insertedIds.length} block(s) at position ${position}.\n\n${renderBlocks(newBlocks)}`,
-    }],
-  };
+  return { content: [{ type: 'text', text: formatMutationResponse(result) }] };
 }
 
-// ── Replace ────────────────────────────────────────────────────
+// ── Remove Lines ───────────────────────────────────────────
 
-function handleReplace(sessions: SessionManager, args: EditArgs): ToolResponse {
-  if (!args.blockId) {
-    return { content: [{ type: 'text', text: 'blockId is required for replace' }], isError: true };
-  }
-  if (!args.content) {
-    return { content: [{ type: 'text', text: 'content is required for replace' }], isError: true };
+function handleRemoveLines(scratchpads: ScratchpadManager, args: EditArgs): ToolResponse {
+  if (args.startLine === undefined) {
+    return { content: [{ type: 'text', text: 'startLine is required for remove_lines.' }], isError: true };
   }
 
-  // Delete the old block, insert new ones at the same position
-  const session = sessions.get(args.sessionHandle)!;
-  const idx = session.blocks.findIndex(b => b.id === args.blockId);
-  if (idx === -1) {
-    return { content: [{ type: 'text', text: `Block '${args.blockId}' not found.` }], isError: true };
+  const result = scratchpads.removeLines(args.scratchpadId!, args.startLine, args.endLine);
+  if (!result) {
+    return { content: [{ type: 'text', text: 'Scratchpad not found.' }], isError: true };
   }
 
-  sessions.deleteBlock(args.sessionHandle, args.blockId);
-  const newBlocks = parseDirectives(args.content);
-  for (let i = 0; i < newBlocks.length; i++) {
-    sessions.insertBlock(args.sessionHandle, idx + i, newBlocks[i]);
-  }
-
-  return {
-    content: [{
-      type: 'text',
-      text: `Replaced block ${args.blockId} with ${newBlocks.length} block(s).\n\n${renderBlocks(newBlocks)}`,
-    }],
-  };
+  return { content: [{ type: 'text', text: formatMutationResponse(result) }] };
 }
 
-// ── Window Edit ────────────────────────────────────────────────
+// ── Submit ─────────────────────────────────────────────────
 
-function handleWindowEdit(sessions: SessionManager, args: EditArgs): ToolResponse {
-  if (!args.searchText) {
-    return { content: [{ type: 'text', text: 'searchText is required for window_edit' }], isError: true };
-  }
-  if (args.replaceText === undefined) {
-    return { content: [{ type: 'text', text: 'replaceText is required for window_edit' }], isError: true };
-  }
-
-  const session = sessions.get(args.sessionHandle)!;
-  let found = false;
-
-  for (const sb of session.blocks) {
-    if (sb.state === 'deleted') continue;
-
-    if (sb.block.type === 'paragraph' && sb.block.text.includes(args.searchText)) {
-      const updated: Block = {
-        ...sb.block,
-        text: sb.block.text.replace(args.searchText, args.replaceText),
-      };
-      sessions.updateBlock(args.sessionHandle, sb.id, updated);
-      found = true;
-      break;
-    }
-
-    if (sb.block.type === 'code' && sb.block.code.includes(args.searchText)) {
-      const updated: Block = {
-        ...sb.block,
-        code: sb.block.code.replace(args.searchText, args.replaceText),
-      };
-      sessions.updateBlock(args.sessionHandle, sb.id, updated);
-      found = true;
-      break;
-    }
-
-    // Search within sections
-    if (sb.block.type === 'section') {
-      const sectionUpdated = windowEditInSection(sb.block, args.searchText, args.replaceText);
-      if (sectionUpdated) {
-        sessions.updateBlock(args.sessionHandle, sb.id, sectionUpdated);
-        found = true;
-        break;
-      }
-    }
-  }
-
-  if (!found) {
-    return { content: [{ type: 'text', text: `Text '${args.searchText}' not found in any block.` }], isError: true };
-  }
-
-  return {
-    content: [{
-      type: 'text',
-      text: `Replaced '${args.searchText}' with '${args.replaceText}'.`,
-    }],
-  };
-}
-
-function windowEditInSection(section: Block & { type: 'section' }, search: string, replace: string): Block | null {
-  for (let i = 0; i < section.content.length; i++) {
-    const block = section.content[i];
-    if (block.type === 'paragraph' && block.text.includes(search)) {
-      const newContent = [...section.content];
-      newContent[i] = { ...block, text: block.text.replace(search, replace) };
-      return { ...section, content: newContent };
-    }
-    if (block.type === 'code' && block.code.includes(search)) {
-      const newContent = [...section.content];
-      newContent[i] = { ...block, code: block.code.replace(search, replace) };
-      return { ...section, content: newContent };
-    }
-  }
-  return null;
-}
-
-// ── Sync ───────────────────────────────────────────────────────
-
-async function handleSync(
+async function handleSubmit(
   client: ConfluenceClient,
-  sessions: SessionManager,
+  scratchpads: ScratchpadManager,
   args: EditArgs,
 ): Promise<ToolResponse> {
-  const session = sessions.get(args.sessionHandle)!;
-  const changes = sessions.getChanges(args.sessionHandle);
+  const sp = scratchpads.get(args.scratchpadId!)!;
+  const content = scratchpads.getContent(args.scratchpadId!)!;
 
-  if (changes.length === 0) {
-    return { content: [{ type: 'text', text: 'No changes to sync.' }] };
+  if (content.trim() === '') {
+    return { content: [{ type: 'text', text: 'Cannot submit empty scratchpad. Add content first.' }], isError: true };
   }
 
-  // Serialize all current (non-deleted) blocks to ADF
-  const currentBlocks = sessions.getCurrentBlocks(args.sessionHandle);
-  const adf = serializeBlocks(currentBlocks);
-
+  // Parse content to blocks
+  let blocks: Block[];
   try {
-    const page = await client.updatePage(
-      session.pageId,
-      undefined, // keep existing title
-      adf,
-      session.version,
-      args.message,
-    );
-
-    sessions.markSynced(args.sessionHandle, page.version.number);
-
-    const changeSummary = changes.map(c => `  ${c.id}: ${c.state}`).join('\n');
-    let text = `Synced ${changes.length} change(s) to Confluence.\n${changeSummary}\nNew version: ${page.version.number}`;
-    text += getNextSteps('edit_sync', { pageId: session.pageId });
-    return { content: [{ type: 'text', text }] };
+    blocks = parseDirectives(content);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    return {
+      content: [{ type: 'text', text: `Submit failed: parse error — ${message}\nScratchpad ${args.scratchpadId} is still active.` }],
+      isError: true,
+    };
+  }
+
+  if (blocks.length === 0) {
+    return {
+      content: [{ type: 'text', text: `Submit failed: content produced no parseable blocks.\nScratchpad ${args.scratchpadId} is still active.` }],
+      isError: true,
+    };
+  }
+
+  // Resolve RawAdfBlock placeholders from side-table
+  const sideTable = scratchpads.getRawAdfSideTable(args.scratchpadId!)!;
+  resolveRawAdfPlaceholders(blocks, sideTable);
+
+  // Serialize to ADF
+  const adf = serializeBlocks(blocks);
+
+  // Push to Confluence
+  try {
+    if (sp.target.type === 'new_page') {
+      const page = await client.createPage(
+        sp.target.spaceId,
+        sp.target.title,
+        adf,
+        sp.target.parentId,
+      );
+      scratchpads.discard(args.scratchpadId!);
+
+      let text = `Page created successfully.\n\nPage ID: ${page.id}\nTitle: ${page.title}\nVersion: ${page.version.number}`;
+      text += getNextSteps('page_create', { pageId: page.id });
+      return { content: [{ type: 'text', text }] };
+    } else {
+      const page = await client.updatePage(
+        sp.target.pageId,
+        sp.target.title,
+        adf,
+        sp.target.version,
+        args.message,
+      );
+      scratchpads.discard(args.scratchpadId!);
+
+      let text = `Page updated successfully.\n\nPage ID: ${page.id}\nTitle: ${page.title}\nVersion: ${page.version.number}`;
+      text += getNextSteps('page_update', { pageId: page.id });
+      return { content: [{ type: 'text', text }] };
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
     if (message.includes('409') || message.includes('version')) {
       return {
         content: [{
           type: 'text',
-          text: `Version conflict: page was modified since you pulled it (version ${session.version}).\nOptions:\n- Re-pull with pull_for_editing to get latest\n- Force sync (not yet implemented)\n\nError: ${message}`,
+          text: `Submit failed: Version conflict — page was modified since pull.\nScratchpad ${args.scratchpadId} is still active.\nOptions: discard and re-pull to get latest, or try again.`,
         }],
         isError: true,
       };
     }
-    return { content: [{ type: 'text', text: `Sync failed: ${message}` }], isError: true };
+
+    return {
+      content: [{ type: 'text', text: `Submit failed: ${message}\nScratchpad ${args.scratchpadId} is still active.` }],
+      isError: true,
+    };
   }
 }
 
-// ── Close ──────────────────────────────────────────────────────
+// ── Discard ────────────────────────────────────────────────
 
-function handleClose(sessions: SessionManager, args: EditArgs): ToolResponse {
-  const changes = sessions.getChanges(args.sessionHandle);
-  sessions.close(args.sessionHandle);
-  const text = changes.length > 0
-    ? `Session closed. Warning: ${changes.length} unsaved change(s) were discarded.`
-    : 'Session closed.';
-  return { content: [{ type: 'text', text }] };
+function handleDiscard(scratchpads: ScratchpadManager, args: EditArgs): ToolResponse {
+  scratchpads.discard(args.scratchpadId!);
+  return { content: [{ type: 'text', text: `Scratchpad ${args.scratchpadId} discarded.` }] };
+}
+
+// ── List ───────────────────────────────────────────────────
+
+function handleList(scratchpads: ScratchpadManager): ToolResponse {
+  const list = scratchpads.list();
+
+  if (list.length === 0) {
+    return { content: [{ type: 'text', text: 'No active scratchpads.' }] };
+  }
+
+  const lines = list.map(sp => {
+    const target = sp.target.type === 'new_page'
+      ? `New page: "${sp.target.title}"`
+      : `Page ${sp.target.pageId}: "${sp.target.title}"`;
+    return `- ${sp.id} | ${target} | ${sp.lineCount} lines | ${sp.validation}`;
+  });
+
+  return { content: [{ type: 'text', text: `Active scratchpads:\n${lines.join('\n')}` }] };
+}
+
+// ── Helpers ────────────────────────────────────────────────
+
+function formatMutationResponse(result: { message: string; context: string; validation: string }): string {
+  const parts = [result.message];
+  if (result.context) parts.push(result.context);
+  parts.push(result.validation);
+  return parts.join('\n');
+}
+
+/**
+ * Walk block tree and resolve RawAdfBlock placeholders from the side-table.
+ */
+function resolveRawAdfPlaceholders(blocks: Block[], sideTable: Map<string, object>): void {
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    if (block.type === 'raw_adf' && block.hash) {
+      const stored = sideTable.get(block.hash);
+      if (stored) {
+        block.adf = stored;
+      }
+    }
+    // Recurse into sections
+    if (block.type === 'section') {
+      resolveRawAdfPlaceholders(block.content, sideTable);
+    }
+    // Recurse into macro bodies
+    if (block.type === 'macro' && block.body) {
+      resolveRawAdfPlaceholders(block.body, sideTable);
+    }
+  }
 }

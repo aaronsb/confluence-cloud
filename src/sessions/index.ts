@@ -1,1 +1,1 @@
-export { SessionManager, type EditingSession, type SessionStatus } from './editing-session.js';
+export { ScratchpadManager, type Scratchpad, type ScratchpadTarget, type ScratchpadSummary, type MutationResult } from './scratchpad.js';

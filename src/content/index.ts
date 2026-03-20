@@ -1,4 +1,4 @@
-export { type Block, type SessionBlock, type SessionBlockState } from './blocks.js';
+export { type Block } from './blocks.js';
 export type {
   SectionBlock, ParagraphBlock, TableBlock, CodeBlock,
   MacroBlock, MediaBlock, ListBlock, RawAdfBlock, ListItem,

@@ -12,7 +12,7 @@ export interface ToolSchema {
 export const toolSchemas: Record<string, ToolSchema> = {
   manage_confluence_page: {
     name: 'manage_confluence_page',
-    description: 'Get, create, update, delete, move, copy, or pull pages for editing. Manage labels and content properties. Use pull_for_editing to start a content editing session.',
+    description: 'Get, create, update, delete, move, copy, or pull pages for editing. Manage labels and content properties. Create returns a scratchpad for composing content before publishing. Use pull_for_editing to load existing page content into a scratchpad.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -66,49 +66,41 @@ export const toolSchemas: Record<string, ToolSchema> = {
 
   edit_confluence_content: {
     name: 'edit_confluence_content',
-    description: 'Structural content editing within an active editing session. Operates on blocks (sections, paragraphs, macros, tables). Requires a sessionHandle from pull_for_editing.',
+    description: 'Line-addressed content editing within a scratchpad buffer. View, insert, replace, or remove lines, then submit to Confluence. Requires a scratchpadId from create or pull_for_editing.',
     inputSchema: {
       type: 'object',
       properties: {
         operation: {
           type: 'string',
-          enum: ['patch_section', 'patch_block', 'append', 'replace', 'window_edit', 'list_blocks', 'sync', 'close'],
+          enum: ['view', 'insert_lines', 'append_lines', 'replace_lines', 'remove_lines', 'submit', 'discard', 'list'],
           description: 'The editing operation to perform',
         },
-        sessionHandle: {
+        scratchpadId: {
           type: 'string',
-          description: 'Session handle from pull_for_editing (required for all operations)',
+          description: 'Scratchpad ID from create or pull_for_editing (required for all ops except list)',
         },
-        blockId: {
-          type: 'string',
-          description: 'Target block ID (required for patch_block, replace)',
+        afterLine: {
+          type: 'number',
+          description: 'Line number to insert after (0 = prepend). For insert_lines.',
         },
-        section: {
-          type: 'string',
-          description: 'Target section heading (for patch_section)',
+        startLine: {
+          type: 'number',
+          description: 'Start of line range (1-based). For view, replace_lines, remove_lines.',
+        },
+        endLine: {
+          type: 'number',
+          description: 'End of line range (1-based, inclusive). For view, replace_lines, remove_lines.',
         },
         content: {
           type: 'string',
-          description: 'New content in markdown with ::: directives for macros',
-        },
-        position: {
-          type: 'number',
-          description: 'Block position for insert operations',
-        },
-        searchText: {
-          type: 'string',
-          description: 'Text to find (for window_edit)',
-        },
-        replaceText: {
-          type: 'string',
-          description: 'Replacement text (for window_edit)',
+          description: 'Text content (newlines create multiple lines). For insert_lines, append_lines, replace_lines.',
         },
         message: {
           type: 'string',
-          description: 'Version message for sync operation',
+          description: 'Version message for submit operation',
         },
       },
-      required: ['operation', 'sessionHandle'],
+      required: ['operation'],
     },
   },
 
