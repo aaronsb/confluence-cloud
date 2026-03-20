@@ -156,6 +156,18 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => ({
       description: 'Confluence macro registry with parameter schemas and usage examples',
       mimeType: 'text/markdown',
     },
+    {
+      uri: 'confluence://instance/summary',
+      name: 'Instance Summary',
+      description: 'Confluence instance overview: available spaces, GraphQL status',
+      mimeType: 'text/markdown',
+    },
+    {
+      uri: 'confluence://tools/documentation',
+      name: 'Tool Documentation',
+      description: 'Complete documentation for all Confluence MCP tools with operations and examples',
+      mimeType: 'text/markdown',
+    },
   ],
 }));
 
@@ -192,6 +204,51 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     };
   }
 
+  if (uri === 'confluence://instance/summary') {
+    const spacesResult = await client.listSpaces({ limit: 250 });
+    const globalSpaces = spacesResult.results.filter(s => s.type === 'global');
+    const personalSpaces = spacesResult.results.filter(s => s.type === 'personal');
+
+    const lines = [
+      '# Confluence Instance Summary',
+      '',
+      `Host: ${CONFLUENCE_HOST}`,
+      `GraphQL: ${graphqlClient ? 'enabled' : 'unavailable (REST-only mode)'}`,
+      '',
+      `## Spaces (${spacesResult.results.length} total)`,
+      '',
+      `Global spaces: ${globalSpaces.length}`,
+      `Personal spaces: ${personalSpaces.length}`,
+      '',
+      '### Global Spaces',
+      '',
+      ...globalSpaces.map(s => `- **${s.name}** (${s.key}) — ${s.status}`),
+      '',
+      '### Personal Spaces',
+      '',
+      ...personalSpaces.map(s => `- **${s.name}** (${s.key}) — ${s.status}`),
+    ];
+
+    return {
+      contents: [{
+        uri,
+        mimeType: 'text/markdown',
+        text: lines.join('\n'),
+      }],
+    };
+  }
+
+  if (uri === 'confluence://tools/documentation') {
+    const docs = generateToolDocumentation();
+    return {
+      contents: [{
+        uri,
+        mimeType: 'text/markdown',
+        text: docs,
+      }],
+    };
+  }
+
   return {
     contents: [{
       uri,
@@ -200,6 +257,52 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     }],
   };
 });
+
+function generateToolDocumentation(): string {
+  const lines: string[] = ['# Confluence Cloud MCP — Tool Documentation', ''];
+
+  for (const schema of Object.values(toolSchemas)) {
+    lines.push(`## ${schema.name}`);
+    lines.push('');
+    lines.push(schema.description);
+    lines.push('');
+
+    const props = schema.inputSchema.properties as Record<string, Record<string, unknown>> | undefined;
+    if (props) {
+      // Show operations first
+      const opProp = props.operation;
+      if (opProp && Array.isArray(opProp.enum)) {
+        lines.push(`**Operations:** ${(opProp.enum as string[]).map(o => `\`${o}\``).join(', ')}`);
+        lines.push('');
+      }
+
+      // Show parameters
+      lines.push('**Parameters:**');
+      lines.push('');
+      lines.push('| Parameter | Type | Description |');
+      lines.push('|-----------|------|-------------|');
+      for (const [name, prop] of Object.entries(props)) {
+        if (name === 'operation') continue;
+        const type = prop.type as string ?? 'any';
+        const desc = prop.description as string ?? '';
+        lines.push(`| \`${name}\` | ${type} | ${desc} |`);
+      }
+      lines.push('');
+    }
+
+    // Required params
+    const required = schema.inputSchema.required as string[] | undefined;
+    if (required && required.length > 0) {
+      lines.push(`**Required:** ${required.map(r => `\`${r}\``).join(', ')}`);
+      lines.push('');
+    }
+
+    lines.push('---');
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
 
 // ── Start Server ───────────────────────────────────────────────
 
