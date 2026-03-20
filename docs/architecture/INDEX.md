@@ -38,6 +38,7 @@ _ADF handling, macro blocks, editing sessions, round-trip fidelity_
 | [ADR-300](./content/ADR-300-adf-content-model-with-typed-blocks.md) | ADF Content Model with Typed Blocks | Draft |
 | [ADR-301](./content/ADR-301-session-based-editing-with-delta-sync.md) | Session-Based Editing with Delta Sync | Draft |
 | [ADR-302](./content/ADR-302-confluence-macro-block-handling.md) | Confluence Macro Block Handling | Draft |
+| [ADR-303](./content/ADR-303-visual-content-pipeline-image-attachments-and-macro-detection.md) | Visual Content Pipeline — Image Attachments and Macro Detection | Draft |
 
 ## Navigation
 _Page hierarchy, link graph, search, progressive disclosure_
