@@ -15,6 +15,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
@@ -178,6 +179,17 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => ({
   ],
 }));
 
+server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+  resourceTemplates: [
+    {
+      uriTemplate: 'confluence://spaces/{key}/overview',
+      name: 'Space Overview',
+      description: 'Space overview with recent pages. Replace {key} with the space key.',
+      mimeType: 'text/markdown',
+    },
+  ],
+}));
+
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const { uri } = request.params;
 
@@ -249,14 +261,19 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
   const spaceMatch = uri.match(/^confluence:\/\/spaces\/([^/]+)\/overview$/);
   if (spaceMatch) {
     const spaceKey = spaceMatch[1];
+    // Validate space key is alphanumeric (prevent CQL injection)
+    if (!/^[a-zA-Z0-9~_]+$/.test(spaceKey)) {
+      return { contents: [{ uri, mimeType: 'text/plain', text: `Invalid space key: ${spaceKey}` }] };
+    }
     // Find space by key via search
-    const searchResult = await client.searchByCql(`type = space AND space.key = "${spaceKey}"`, { limit: 1 });
+    const { escapeCql: esc } = await import('./client/cql-utils.js');
+    const searchResult = await client.searchByCql(`type = space AND space.key = "${esc(spaceKey)}"`, { limit: 1 });
     if (searchResult.results.length === 0) {
       return { contents: [{ uri, mimeType: 'text/plain', text: `Space not found: ${spaceKey}` }] };
     }
     // Get recent pages
     const recentPages = await client.searchByCql(
-      `type = page AND space = "${spaceKey}" ORDER BY lastmodified DESC`,
+      `type = page AND space = "${esc(spaceKey)}" ORDER BY lastmodified DESC`,
       { limit: 10 },
     );
     const lines = [

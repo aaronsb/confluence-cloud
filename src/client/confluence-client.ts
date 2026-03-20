@@ -268,9 +268,19 @@ export class ConfluenceRestClient implements ConfluenceClient {
       throw new Error(`Attachment ${id} has no download URL`);
     }
     // Download URL is relative to the wiki root (e.g., /download/attachments/...)
-    const url = info.downloadUrl.startsWith('http')
-      ? info.downloadUrl
-      : `${this.baseUrl.replace('/wiki/api/v2', '')}/wiki${info.downloadUrl}`;
+    const host = this.baseUrl.replace('/wiki/api/v2', '');
+    let url: string;
+    if (info.downloadUrl.startsWith('http')) {
+      // Validate origin matches configured host to prevent SSRF
+      const parsed = new URL(info.downloadUrl);
+      const expected = new URL(host);
+      if (parsed.origin !== expected.origin) {
+        throw new Error(`Attachment download URL origin mismatch: ${parsed.origin} !== ${expected.origin}`);
+      }
+      url = info.downloadUrl;
+    } else {
+      url = `${host}/wiki${info.downloadUrl}`;
+    }
     const response = await fetch(url, {
       headers: { 'Authorization': this.headers['Authorization'] },
     });

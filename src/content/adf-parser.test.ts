@@ -269,6 +269,31 @@ describe('parseAdf', () => {
     }
   });
 
+  it('should parse table with rowSpan', () => {
+    const adf = {
+      type: 'doc',
+      content: [{
+        type: 'table',
+        content: [
+          { type: 'tableRow', content: [
+            { type: 'tableCell', attrs: { rowspan: 2 }, content: [
+              { type: 'paragraph', content: [{ type: 'text', text: 'Tall Cell' }] },
+            ]},
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Right 1' }] }] },
+          ]},
+          { type: 'tableRow', content: [
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Right 2' }] }] },
+          ]},
+        ],
+      }],
+    };
+    const blocks = parseAdf(adf);
+    expect(blocks[0].type).toBe('table');
+    if (blocks[0].type === 'table') {
+      expect(blocks[0].headers[0]).toEqual({ text: 'Tall Cell', colSpan: undefined, rowSpan: 2 });
+    }
+  });
+
   it('should parse table with merged cells preserving colSpan/rowSpan', () => {
     const adf = {
       type: 'doc',
