@@ -297,6 +297,70 @@ describe('serializeBlocks', () => {
     expect(listItem.content![1].type).toBe('bulletList');
   });
 
+  it('should round-trip section/column multi-body macros', () => {
+    const original = {
+      type: 'doc' as const,
+      content: [{
+        type: 'bodiedExtension',
+        attrs: {
+          extensionType: 'com.atlassian.confluence.macro.core',
+          extensionKey: 'section',
+          parameters: {},
+        },
+        content: [
+          {
+            type: 'bodiedExtension',
+            attrs: {
+              extensionType: 'com.atlassian.confluence.macro.core',
+              extensionKey: 'column',
+              parameters: { macroParams: { width: { value: '50%' } } },
+            },
+            content: [
+              { type: 'paragraph', content: [{ type: 'text', text: 'Left column' }] },
+            ],
+          },
+          {
+            type: 'bodiedExtension',
+            attrs: {
+              extensionType: 'com.atlassian.confluence.macro.core',
+              extensionKey: 'column',
+              parameters: { macroParams: { width: { value: '50%' } } },
+            },
+            content: [
+              { type: 'paragraph', content: [{ type: 'text', text: 'Right column' }] },
+            ],
+          },
+        ],
+      }],
+    };
+    const blocks = parseAdf(original);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe('macro');
+    if (blocks[0].type === 'macro') {
+      expect(blocks[0].macroId).toBe('section');
+      expect(blocks[0].body).toHaveLength(2);
+      // Each column is a nested macro with its own body
+      const col1 = blocks[0].body![0];
+      const col2 = blocks[0].body![1];
+      expect(col1.type).toBe('macro');
+      expect(col2.type).toBe('macro');
+      if (col1.type === 'macro' && col2.type === 'macro') {
+        expect(col1.macroId).toBe('column');
+        expect(col1.params.width).toBe('50%');
+        expect(col2.macroId).toBe('column');
+      }
+    }
+
+    // Round-trip: serialize back
+    const serialized = serializeBlocks(blocks);
+    expect(serialized.content![0].type).toBe('bodiedExtension');
+    expect(serialized.content![0].attrs?.extensionKey).toBe('section');
+    // Two nested column bodiedExtensions
+    expect(serialized.content![0].content).toHaveLength(2);
+    expect(serialized.content![0].content![0].type).toBe('bodiedExtension');
+    expect(serialized.content![0].content![0].attrs?.extensionKey).toBe('column');
+  });
+
   it('should block javascript: URLs in links', () => {
     const blocks: Block[] = [
       { type: 'paragraph', text: '[click](javascript:alert(1))', id: '1' },

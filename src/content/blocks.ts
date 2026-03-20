@@ -31,10 +31,16 @@ export interface ParagraphBlock {
   id?: string;
 }
 
+export interface TableCell {
+  text: string;
+  colSpan?: number;
+  rowSpan?: number;
+}
+
 export interface TableBlock {
   type: 'table';
-  headers: string[];
-  rows: string[][];
+  headers: (string | TableCell)[];
+  rows: (string | TableCell)[][];
   id?: string;
 }
 
@@ -51,6 +57,7 @@ export interface MacroBlock {
   macroId: string;
   params: Record<string, string>;
   body?: Block[];
+  category?: string;
   id?: string;
 }
 

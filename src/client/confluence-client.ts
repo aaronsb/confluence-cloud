@@ -40,6 +40,8 @@ export interface ConfluenceClient {
 
   // Attachments
   getAttachments(pageId: string, options?: PaginationOptions): Promise<PaginatedResponse<Attachment>>;
+  getAttachmentInfo(id: string): Promise<Attachment>;
+  downloadAttachment(id: string): Promise<Buffer>;
   uploadAttachment(pageId: string, filename: string, content: Buffer, mediaType: string): Promise<Attachment>;
   deleteAttachment(id: string): Promise<void>;
 
@@ -253,6 +255,29 @@ export class ConfluenceRestClient implements ConfluenceClient {
       results: raw.results.map(mapAttachment),
       cursor: raw._links?.next ? extractCursor(raw._links.next) : undefined,
     };
+  }
+
+  async getAttachmentInfo(id: string): Promise<Attachment> {
+    const raw = await this.request<ConfluenceV2Attachment>(`/attachments/${id}`);
+    return mapAttachment(raw);
+  }
+
+  async downloadAttachment(id: string): Promise<Buffer> {
+    const info = await this.getAttachmentInfo(id);
+    if (!info.downloadUrl) {
+      throw new Error(`Attachment ${id} has no download URL`);
+    }
+    // Download URL is relative to the wiki root (e.g., /download/attachments/...)
+    const url = info.downloadUrl.startsWith('http')
+      ? info.downloadUrl
+      : `${this.baseUrl.replace('/wiki/api/v2', '')}/wiki${info.downloadUrl}`;
+    const response = await fetch(url, {
+      headers: { 'Authorization': this.headers['Authorization'] },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to download attachment ${id}: HTTP ${response.status}`);
+    }
+    return Buffer.from(await response.arrayBuffer());
   }
 
   async uploadAttachment(pageId: string, filename: string, content: Buffer, mediaType: string): Promise<Attachment> {

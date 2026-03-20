@@ -245,6 +245,35 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     };
   }
 
+  // confluence://spaces/{key}/overview
+  const spaceMatch = uri.match(/^confluence:\/\/spaces\/([^/]+)\/overview$/);
+  if (spaceMatch) {
+    const spaceKey = spaceMatch[1];
+    // Find space by key via search
+    const searchResult = await client.searchByCql(`type = space AND space.key = "${spaceKey}"`, { limit: 1 });
+    if (searchResult.results.length === 0) {
+      return { contents: [{ uri, mimeType: 'text/plain', text: `Space not found: ${spaceKey}` }] };
+    }
+    // Get recent pages
+    const recentPages = await client.searchByCql(
+      `type = page AND space = "${spaceKey}" ORDER BY lastmodified DESC`,
+      { limit: 10 },
+    );
+    const lines = [
+      `# Space: ${spaceKey}`,
+      '',
+      `## Recent Pages`,
+      '',
+      ...recentPages.results.map(r =>
+        `- **${r.content.title}** | id:${r.content.id} | ${r.lastModified}`
+      ),
+    ];
+    if (recentPages.results.length === 0) {
+      lines.push('No pages found in this space.');
+    }
+    return { contents: [{ uri, mimeType: 'text/markdown', text: lines.join('\n') }] };
+  }
+
   if (uri === 'confluence://tools/documentation') {
     const { renderToolDocumentation } = await import('./rendering/markdown-renderer.js');
     const docs = renderToolDocumentation(toolSchemas);

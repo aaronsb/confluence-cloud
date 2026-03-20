@@ -195,13 +195,13 @@ export const toolSchemas: Record<string, ToolSchema> = {
 
   manage_confluence_media: {
     name: 'manage_confluence_media',
-    description: 'Upload, download, list, or delete page attachments and media.',
+    description: 'Upload, download, list, view, or delete page attachments and media. Use view to display images inline.',
     inputSchema: {
       type: 'object',
       properties: {
         operation: {
           type: 'string',
-          enum: ['upload', 'download', 'list', 'delete', 'get_info'],
+          enum: ['upload', 'download', 'list', 'delete', 'get_info', 'view'],
           description: 'The media operation to perform',
         },
         pageId: {
