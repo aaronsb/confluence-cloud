@@ -9,6 +9,7 @@ import type {
   SectionBlock,
   ParagraphBlock,
   TableBlock,
+  TableCell,
   CodeBlock,
   MacroBlock,
   MediaBlock,
@@ -30,6 +31,19 @@ interface AdfMark {
   type: string;
   attrs?: Record<string, unknown>;
 }
+
+// ── Macro Category Lookup ─────────────────────────────────────
+
+const MACRO_CATEGORIES: Record<string, string> = {
+  'mermaid': 'diagram:mermaid',
+  'mermaid-cloud': 'diagram:mermaid',
+  'drawio': 'diagram:drawio',
+  'draw.io': 'diagram:drawio',
+  'gliffy': 'diagram:gliffy',
+  'image': 'visual:image',
+  'gallery': 'visual:image',
+  'chart': 'visual:chart',
+};
 
 // ── ID Generator ──────────────────────────────────────────────
 
@@ -123,8 +137,8 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
   }
 
   function parseTable(node: AdfNode): TableBlock {
-    const headers: string[] = [];
-    const rows: string[][] = [];
+    const headers: (string | TableCell)[] = [];
+    const rows: (string | TableCell)[][] = [];
 
     if (!node.content) return { type: 'table', headers: [], rows: [], id: nextId() };
 
@@ -132,7 +146,7 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
       const row = node.content[i];
       if (!row.content) continue;
 
-      const cells = row.content.map(cell => extractText(cell));
+      const cells = row.content.map(cell => parseTableCell(cell));
 
       if (i === 0 && row.type === 'tableHeader') {
         headers.push(...cells);
@@ -144,6 +158,16 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
     }
 
     return { type: 'table', headers, rows, id: nextId() };
+  }
+
+  function parseTableCell(cell: AdfNode): string | TableCell {
+    const text = extractText(cell);
+    const colSpan = cell.attrs?.colspan as number | undefined;
+    const rowSpan = cell.attrs?.rowspan as number | undefined;
+    if ((colSpan && colSpan > 1) || (rowSpan && rowSpan > 1)) {
+      return { text, colSpan, rowSpan };
+    }
+    return text;
   }
 
   function parseCodeBlock(node: AdfNode): CodeBlock {
@@ -176,6 +200,7 @@ export function parseAdf(adfDocument: AdfNode): Block[] {
       macroId: extensionKey,
       params,
       body: body && body.length > 0 ? body : undefined,
+      category: MACRO_CATEGORIES[extensionKey],
       id: nextId(),
     };
   }

@@ -269,7 +269,32 @@ describe('parseAdf', () => {
     }
   });
 
-  it('should parse table with merged cells (colSpan/rowSpan preserved as raw)', () => {
+  it('should parse table with rowSpan', () => {
+    const adf = {
+      type: 'doc',
+      content: [{
+        type: 'table',
+        content: [
+          { type: 'tableRow', content: [
+            { type: 'tableCell', attrs: { rowspan: 2 }, content: [
+              { type: 'paragraph', content: [{ type: 'text', text: 'Tall Cell' }] },
+            ]},
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Right 1' }] }] },
+          ]},
+          { type: 'tableRow', content: [
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Right 2' }] }] },
+          ]},
+        ],
+      }],
+    };
+    const blocks = parseAdf(adf);
+    expect(blocks[0].type).toBe('table');
+    if (blocks[0].type === 'table') {
+      expect(blocks[0].headers[0]).toEqual({ text: 'Tall Cell', colSpan: undefined, rowSpan: 2 });
+    }
+  });
+
+  it('should parse table with merged cells preserving colSpan/rowSpan', () => {
     const adf = {
       type: 'doc',
       content: [{
@@ -290,7 +315,7 @@ describe('parseAdf', () => {
     const blocks = parseAdf(adf);
     expect(blocks[0].type).toBe('table');
     if (blocks[0].type === 'table') {
-      expect(blocks[0].headers).toEqual(['Wide Header']);
+      expect(blocks[0].headers).toEqual([{ text: 'Wide Header', colSpan: 2, rowSpan: undefined }]);
       expect(blocks[0].rows).toEqual([['A', 'B']]);
     }
   });
@@ -336,6 +361,53 @@ describe('parseAdf', () => {
       expect(blocks[0].ordered).toBe(false);
       expect(blocks[0].items[0].childrenOrdered).toBe(true);
       expect(blocks[0].items[0].children).toHaveLength(1);
+    }
+  });
+
+  // ── Macro category detection ────────────────────────────────
+
+  it('should detect mermaid macro category', () => {
+    const adf = {
+      type: 'doc',
+      content: [{
+        type: 'bodiedExtension',
+        attrs: { extensionType: 'com.atlassian.confluence.macro.core', extensionKey: 'mermaid' },
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'graph LR\n  A --> B' }] }],
+      }],
+    };
+    const blocks = parseAdf(adf);
+    expect(blocks[0].type).toBe('macro');
+    if (blocks[0].type === 'macro') {
+      expect(blocks[0].category).toBe('diagram:mermaid');
+      expect(blocks[0].body).toHaveLength(1);
+    }
+  });
+
+  it('should detect drawio macro category', () => {
+    const adf = {
+      type: 'doc',
+      content: [{
+        type: 'extension',
+        attrs: { extensionType: 'com.atlassian.confluence.macro.core', extensionKey: 'drawio' },
+      }],
+    };
+    const blocks = parseAdf(adf);
+    if (blocks[0].type === 'macro') {
+      expect(blocks[0].category).toBe('diagram:drawio');
+    }
+  });
+
+  it('should not set category for unknown macros', () => {
+    const adf = {
+      type: 'doc',
+      content: [{
+        type: 'extension',
+        attrs: { extensionType: 'com.atlassian.confluence.macro.core', extensionKey: 'custom-widget' },
+      }],
+    };
+    const blocks = parseAdf(adf);
+    if (blocks[0].type === 'macro') {
+      expect(blocks[0].category).toBeUndefined();
     }
   });
 

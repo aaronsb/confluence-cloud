@@ -9,6 +9,7 @@ import type {
   Block,
   SectionBlock,
   ParagraphBlock,
+  TableCell,
   TableBlock,
   CodeBlock,
   MacroBlock,
@@ -85,10 +86,7 @@ function serializeTable(block: TableBlock): AdfNode {
   if (block.headers.length > 0) {
     rows.push({
       type: 'tableRow',
-      content: block.headers.map(cell => ({
-        type: 'tableHeader',
-        content: [{ type: 'paragraph', content: parseInlineText(cell) }],
-      })),
+      content: block.headers.map(cell => serializeTableCell(cell, 'tableHeader')),
     });
   }
 
@@ -96,14 +94,26 @@ function serializeTable(block: TableBlock): AdfNode {
   for (const row of block.rows) {
     rows.push({
       type: 'tableRow',
-      content: row.map(cell => ({
-        type: 'tableCell',
-        content: [{ type: 'paragraph', content: parseInlineText(cell) }],
-      })),
+      content: row.map(cell => serializeTableCell(cell, 'tableCell')),
     });
   }
 
   return { type: 'table', content: rows };
+}
+
+function serializeTableCell(cell: string | TableCell, cellType: 'tableHeader' | 'tableCell'): AdfNode {
+  const text = typeof cell === 'string' ? cell : cell.text;
+  const node: AdfNode = {
+    type: cellType,
+    content: [{ type: 'paragraph', content: parseInlineText(text) }],
+  };
+  if (typeof cell === 'object') {
+    const attrs: Record<string, unknown> = {};
+    if (cell.colSpan && cell.colSpan > 1) attrs.colspan = cell.colSpan;
+    if (cell.rowSpan && cell.rowSpan > 1) attrs.rowspan = cell.rowSpan;
+    if (Object.keys(attrs).length > 0) node.attrs = attrs;
+  }
+  return node;
 }
 
 // ── Code Block ─────────────────────────────────────────────────
