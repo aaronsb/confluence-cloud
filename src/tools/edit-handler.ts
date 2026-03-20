@@ -4,13 +4,13 @@
  */
 
 import type { ConfluenceClient } from '../client/confluence-client.js';
+import { serializeBlocks } from '../content/adf-serializer.js';
+import type { Block } from '../content/blocks.js';
+import { parseDirectives } from '../content/directive-parser.js';
+import { renderBlocks } from '../content/renderer.js';
+import { getNextSteps } from '../rendering/next-steps.js';
 import type { SessionManager } from '../sessions/editing-session.js';
 import type { ToolResponse } from '../types/index.js';
-import type { Block } from '../content/blocks.js';
-import { renderBlocks } from '../content/renderer.js';
-import { serializeBlocks } from '../content/adf-serializer.js';
-import { parseDirectives } from '../content/directive-parser.js';
-import { getNextSteps } from '../rendering/next-steps.js';
 
 interface EditArgs {
   operation: string;

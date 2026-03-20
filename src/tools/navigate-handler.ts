@@ -3,11 +3,11 @@
  */
 
 import type { ConfluenceClient } from '../client/confluence-client.js';
-import type { ToolResponse } from '../types/index.js';
-import type { NavigationService } from '../navigation/navigation-service.js';
 import type { GraphQLClient } from '../client/graphql-client.js';
+import type { NavigationService } from '../navigation/navigation-service.js';
 import { renderPageList, renderTree } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
+import type { ToolResponse } from '../types/index.js';
 
 interface NavigateArgs {
   operation: string;
@@ -84,7 +84,7 @@ export async function handleNavigateRequest(
     }
 
     case 'related': {
-      const { pages, sharedLabels } = await nav.getRelated(args.pageId);
+      const { pages } = await nav.getRelated(args.pageId);
       if (pages.length === 0) {
         let text = 'No related pages found (page has no labels, or no other pages share them).';
         text += getNextSteps('navigate', { pageId: args.pageId });

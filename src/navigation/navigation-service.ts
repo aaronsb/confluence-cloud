@@ -4,10 +4,10 @@
  */
 
 import type { ConfluenceClient } from '../client/confluence-client.js';
-import type { GraphQLClient } from '../client/graphql-client.js';
 import { escapeCql } from '../client/cql-utils.js';
-import type { Page } from '../types/index.js';
+import type { GraphQLClient } from '../client/graphql-client.js';
 import type { AdfNode } from '../content/adf-parser.js';
+import type { Page } from '../types/index.js';
 
 export interface TreeNode {
   page: Page;

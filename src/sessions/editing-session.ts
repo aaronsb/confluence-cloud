@@ -4,6 +4,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+
 import type { Block, SessionBlock, SessionBlockState } from '../content/blocks.js';
 
 // ── Session Types ──────────────────────────────────────────────

@@ -7,6 +7,8 @@
  * See docs/architecture/ for ADRs describing the design.
  */
 
+import { createRequire } from 'node:module';
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -15,21 +17,20 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { createRequire } from 'node:module';
 
 import { ConfluenceRestClient } from './client/confluence-client.js';
 import { discoverCloudId, GraphQLClient } from './client/graphql-client.js';
-import { SessionManager } from './sessions/editing-session.js';
 import { MacroRegistry } from './content/macro-registry.js';
-import { toolSchemas } from './tools/tool-schemas.js';
-import { handlePageRequest } from './tools/page-handler.js';
+import { NavigationService } from './navigation/navigation-service.js';
+import { SessionManager } from './sessions/editing-session.js';
 import { handleEditRequest } from './tools/edit-handler.js';
-import { handleSpaceRequest } from './tools/space-handler.js';
-import { handleSearchRequest } from './tools/search-handler.js';
 import { handleMediaRequest } from './tools/media-handler.js';
 import { handleNavigateRequest } from './tools/navigate-handler.js';
+import { handlePageRequest } from './tools/page-handler.js';
 import { handleQueueRequest } from './tools/queue-handler.js';
-import { NavigationService } from './navigation/navigation-service.js';
+import { handleSearchRequest } from './tools/search-handler.js';
+import { handleSpaceRequest } from './tools/space-handler.js';
+import { toolSchemas } from './tools/tool-schemas.js';
 import type { ToolResponse } from './types/index.js';
 
 // ── Configuration ──────────────────────────────────────────────
@@ -129,7 +130,7 @@ const toolHandlers: Record<string, ToolHandler> = {
 };
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+server.setRequestHandler(CallToolRequestSchema, async (request, _extra) => {
   const { name, arguments: args } = request.params;
   const handler = toolHandlers[name];
 

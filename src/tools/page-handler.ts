@@ -3,12 +3,12 @@
  */
 
 import type { ConfluenceClient } from '../client/confluence-client.js';
-import type { SessionManager } from '../sessions/editing-session.js';
-import type { ToolResponse } from '../types/index.js';
-import { renderPage, renderPageList } from '../rendering/markdown-renderer.js';
-import { getNextSteps } from '../rendering/next-steps.js';
 import { parseAdf, type AdfNode } from '../content/adf-parser.js';
 import { renderBlocks } from '../content/renderer.js';
+import { renderPage } from '../rendering/markdown-renderer.js';
+import { getNextSteps } from '../rendering/next-steps.js';
+import type { SessionManager } from '../sessions/editing-session.js';
+import type { ToolResponse } from '../types/index.js';
 
 interface PageArgs {
   operation: string;

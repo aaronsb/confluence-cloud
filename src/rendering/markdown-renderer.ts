@@ -3,7 +3,11 @@
  * See ADR-500: Rendering Facades and Semantic Hinting.
  */
 
+import type { ToolSchema } from '../tools/tool-schemas.js';
 import type { Page, Space, SearchResult, Attachment } from '../types/index.js';
+
+// ── Tool Documentation ────────────────────────────────────────
+
 
 export function renderPage(page: Page, options?: { showBody?: boolean }): string {
   const lines: string[] = [];
@@ -137,10 +141,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
-
-// ── Tool Documentation ────────────────────────────────────────
-
-import type { ToolSchema } from '../tools/tool-schemas.js';
 
 export function renderToolDocumentation(schemas: Record<string, ToolSchema>): string {
   const lines: string[] = ['# Confluence Cloud MCP — Tool Documentation', ''];

@@ -3,9 +3,9 @@
  */
 
 import type { ConfluenceClient } from '../client/confluence-client.js';
-import type { ToolResponse } from '../types/index.js';
 import { renderAttachmentList } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
+import type { ToolResponse } from '../types/index.js';
 
 interface MediaArgs {
   operation: string;

@@ -3,10 +3,10 @@
  */
 
 import type { ConfluenceClient } from '../client/confluence-client.js';
-import type { ToolResponse } from '../types/index.js';
 import { escapeCql } from '../client/cql-utils.js';
 import { renderSearchResults } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
+import type { ToolResponse } from '../types/index.js';
 
 interface SearchArgs {
   operation: string;

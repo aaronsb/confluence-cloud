@@ -3,6 +3,7 @@
  * See ADR-200: Hybrid REST and GraphQL Client.
  */
 
+import { MAX_RETRIES, sleep, parseRetryAfter, isRetryable } from './retry-utils.js';
 import type {
   ConfluenceConfig,
   Page,
@@ -13,6 +14,9 @@ import type {
   PaginationOptions,
   PaginatedResponse,
 } from '../types/index.js';
+
+// ── REST v2 Implementation ─────────────────────────────────────
+
 
 // ── Client Interface ───────────────────────────────────────────
 
@@ -51,10 +55,6 @@ export interface ConfluenceClient {
   setProperty(pageId: string, key: string, value: Record<string, unknown>): Promise<ContentProperty>;
   deleteProperty(pageId: string, key: string): Promise<void>;
 }
-
-// ── REST v2 Implementation ─────────────────────────────────────
-
-import { MAX_RETRIES, sleep, parseRetryAfter, isRetryable } from './retry-utils.js';
 
 // ── Client ────────────────────────────────────────────────────
 
@@ -397,17 +397,6 @@ interface ConfluenceV2ContentProperty {
 
 interface ConfluenceV2PaginatedResponse<T = ConfluenceV2Page> {
   results: T[];
-  _links?: { next?: string };
-}
-
-interface ConfluenceV2SearchResponse {
-  results: Array<{
-    content: ConfluenceV2Page;
-    excerpt?: string;
-    lastModified?: string;
-    url?: string;
-  }>;
-  totalSize?: number;
   _links?: { next?: string };
 }
 
