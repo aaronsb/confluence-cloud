@@ -9,6 +9,7 @@ import type {
   Space,
   SearchResult,
   Attachment,
+  ContentProperty,
   PaginationOptions,
   PaginatedResponse,
 } from '../types/index.js';
@@ -42,6 +43,12 @@ export interface ConfluenceClient {
   getLabels(pageId: string): Promise<string[]>;
   addLabel(pageId: string, label: string): Promise<void>;
   removeLabel(pageId: string, label: string): Promise<void>;
+
+  // Content Properties
+  getProperties(pageId: string): Promise<ContentProperty[]>;
+  getProperty(pageId: string, key: string): Promise<ContentProperty>;
+  setProperty(pageId: string, key: string, value: Record<string, unknown>): Promise<ContentProperty>;
+  deleteProperty(pageId: string, key: string): Promise<void>;
 }
 
 // ── REST v2 Implementation ─────────────────────────────────────
@@ -283,6 +290,60 @@ export class ConfluenceRestClient implements ConfluenceClient {
   async removeLabel(pageId: string, label: string): Promise<void> {
     await this.request(`/pages/${pageId}/labels/${label}`, { method: 'DELETE' });
   }
+
+  // ── Content Properties ──────────────────────────────────────
+
+  async getProperties(pageId: string): Promise<ContentProperty[]> {
+    const raw = await this.request<ConfluenceV2PaginatedResponse<ConfluenceV2ContentProperty>>(
+      `/pages/${pageId}/properties`,
+    );
+    return raw.results.map(mapContentProperty);
+  }
+
+  async getProperty(pageId: string, key: string): Promise<ContentProperty> {
+    const raw = await this.request<ConfluenceV2ContentProperty>(
+      `/pages/${pageId}/properties/${key}`,
+    );
+    return mapContentProperty(raw);
+  }
+
+  async setProperty(pageId: string, key: string, value: Record<string, unknown>): Promise<ContentProperty> {
+    // Upsert: try to get existing property for version, then PUT; if not found, POST to create
+    try {
+      const existing = await this.request<ConfluenceV2ContentProperty>(
+        `/pages/${pageId}/properties/${key}`,
+      );
+      const raw = await this.request<ConfluenceV2ContentProperty>(
+        `/pages/${pageId}/properties/${key}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            key,
+            value,
+            version: { number: (existing.version?.number ?? 0) + 1 },
+          }),
+        },
+      );
+      return mapContentProperty(raw);
+    } catch (err) {
+      // Property doesn't exist — create it
+      if (err instanceof Error && err.message.includes('404')) {
+        const raw = await this.request<ConfluenceV2ContentProperty>(
+          `/pages/${pageId}/properties`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ key, value }),
+          },
+        );
+        return mapContentProperty(raw);
+      }
+      throw err;
+    }
+  }
+
+  async deleteProperty(pageId: string, key: string): Promise<void> {
+    await this.request(`/pages/${pageId}/properties/${key}`, { method: 'DELETE' });
+  }
 }
 
 // ── V2 API Response Types (internal) ───────────────────────────
@@ -319,6 +380,12 @@ interface ConfluenceV2Attachment {
   pageId?: string;
   version?: { number: number };
   createdAt?: string;
+}
+
+interface ConfluenceV2ContentProperty {
+  key: string;
+  value: Record<string, unknown>;
+  version?: { number: number; createdAt?: string };
 }
 
 interface ConfluenceV2PaginatedResponse<T = ConfluenceV2Page> {
@@ -426,6 +493,14 @@ function mapV1Content(raw: ConfluenceV1Content): Page {
     },
     createdAt: raw.version?.when ?? '',
     authorId: raw.version?.by?.accountId ?? raw.version?.by?.displayName ?? '',
+  };
+}
+
+function mapContentProperty(raw: ConfluenceV2ContentProperty): ContentProperty {
+  return {
+    key: raw.key,
+    value: raw.value,
+    version: { number: raw.version?.number ?? 1, createdAt: raw.version?.createdAt },
   };
 }
 

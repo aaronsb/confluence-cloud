@@ -12,13 +12,13 @@ export interface ToolSchema {
 export const toolSchemas: Record<string, ToolSchema> = {
   manage_confluence_page: {
     name: 'manage_confluence_page',
-    description: 'Get, create, update, delete, move, copy, or pull pages for editing. Use pull_for_editing to start a content editing session.',
+    description: 'Get, create, update, delete, move, copy, or pull pages for editing. Manage labels and content properties. Use pull_for_editing to start a content editing session.',
     inputSchema: {
       type: 'object',
       properties: {
         operation: {
           type: 'string',
-          enum: ['get', 'create', 'update', 'delete', 'move', 'copy', 'get_versions', 'pull_for_editing'],
+          enum: ['get', 'create', 'update', 'delete', 'move', 'copy', 'get_versions', 'pull_for_editing', 'get_labels', 'add_labels', 'remove_label', 'get_properties', 'get_property', 'set_property', 'delete_property'],
           description: 'The operation to perform',
         },
         pageId: {
@@ -41,6 +41,23 @@ export const toolSchemas: Record<string, ToolSchema> = {
           type: 'array',
           items: { type: 'string', enum: ['body', 'labels', 'history', 'restrictions'] },
           description: 'Additional data to include in the response',
+        },
+        labels: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Labels to add (for add_labels operation)',
+        },
+        label: {
+          type: 'string',
+          description: 'Label to remove (for remove_label operation)',
+        },
+        propertyKey: {
+          type: 'string',
+          description: 'Content property key (for get_property, set_property, delete_property)',
+        },
+        propertyValue: {
+          type: 'object',
+          description: 'Content property value as JSON object (for set_property)',
         },
       },
       required: ['operation'],
@@ -220,7 +237,7 @@ export const toolSchemas: Record<string, ToolSchema> = {
       properties: {
         operation: {
           type: 'string',
-          enum: ['children', 'ancestors', 'siblings', 'links', 'backlinks', 'tree', 'related'],
+          enum: ['children', 'ancestors', 'siblings', 'links', 'backlinks', 'tree', 'related', 'discover_metadata'],
           description: 'Navigation operation',
         },
         pageId: {

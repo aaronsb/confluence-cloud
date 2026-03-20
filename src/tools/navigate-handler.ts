@@ -4,6 +4,7 @@
 
 import type { ToolResponse } from '../types/index.js';
 import type { NavigationService } from '../navigation/navigation-service.js';
+import type { GraphQLClient } from '../client/graphql-client.js';
 import { renderPageList, renderTree } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
 
@@ -18,6 +19,7 @@ interface NavigateArgs {
 export async function handleNavigateRequest(
   nav: NavigationService,
   args: NavigateArgs,
+  graphql?: GraphQLClient | null,
 ): Promise<ToolResponse> {
 
   switch (args.operation) {
@@ -91,7 +93,101 @@ export async function handleNavigateRequest(
       return { content: [{ type: 'text', text }] };
     }
 
+    case 'discover_metadata': {
+      return handleDiscoverMetadata(graphql, args.pageId);
+    }
+
     default:
       return { content: [{ type: 'text', text: `Unknown navigation operation: ${args.operation}` }], isError: true };
   }
+}
+
+async function handleDiscoverMetadata(
+  graphql: GraphQLClient | null | undefined,
+  pageId?: string,
+): Promise<ToolResponse> {
+  if (!graphql) {
+    return {
+      content: [{
+        type: 'text',
+        text: [
+          'Metadata discovery requires GraphQL (not available for this instance).',
+          '',
+          'Known metadata operations available via `manage_confluence_page`:',
+          '- `get_labels` / `add_labels` / `remove_label` — page labels',
+          '- `get_properties` / `get_property` / `set_property` / `delete_property` — content properties',
+        ].join('\n'),
+      }],
+    };
+  }
+
+  // Introspect the ConfluencePage type to discover available metadata fields
+  const introspection = await graphql.query<{
+    __type: {
+      fields: Array<{
+        name: string;
+        description: string | null;
+        type: { name: string | null; kind: string; ofType?: { name: string | null; kind: string } };
+      }>;
+    };
+  }>(`query IntrospectConfluencePage {
+    __type(name: "ConfluencePage") {
+      fields {
+        name
+        description
+        type { name kind ofType { name kind } }
+      }
+    }
+  }`);
+
+  if (!introspection.success || !introspection.data?.__type) {
+    return {
+      content: [{
+        type: 'text',
+        text: 'Could not introspect ConfluencePage type. ' + (introspection.error ?? ''),
+      }],
+      isError: true,
+    };
+  }
+
+  const fields = introspection.data.__type.fields;
+
+  // Categorize discovered fields
+  const builtIn = ['id', 'title', 'status', 'version', 'space', 'body', 'labels', 'properties'];
+  const relationships = ['ancestors', 'children', 'parent', 'links', 'backlinks'];
+
+  const categorized = {
+    builtInMetadata: fields.filter(f => builtIn.some(b => f.name.toLowerCase().includes(b))),
+    relationships: fields.filter(f => relationships.some(r => f.name.toLowerCase().includes(r))),
+    extended: fields.filter(f =>
+      !builtIn.some(b => f.name.toLowerCase().includes(b)) &&
+      !relationships.some(r => f.name.toLowerCase().includes(r))
+    ),
+  };
+
+  const lines: string[] = [
+    `Discovered ${fields.length} fields on ConfluencePage:`,
+    '',
+    '## Built-in Metadata',
+    ...categorized.builtInMetadata.map(f => `- **${f.name}** (${formatType(f.type)})${f.description ? ` — ${f.description}` : ''}`),
+    '',
+    '## Relationships',
+    ...categorized.relationships.map(f => `- **${f.name}** (${formatType(f.type)})${f.description ? ` — ${f.description}` : ''}`),
+    '',
+    '## Extended',
+    ...categorized.extended.map(f => `- **${f.name}** (${formatType(f.type)})${f.description ? ` — ${f.description}` : ''}`),
+    '',
+    '---',
+    '**First-class operations available:**',
+    '- Labels: `get_labels`, `add_labels`, `remove_label`',
+    '- Properties: `get_properties`, `get_property`, `set_property`, `delete_property`',
+  ];
+
+  return { content: [{ type: 'text', text: lines.join('\n') }] };
+}
+
+function formatType(type: { name: string | null; kind: string; ofType?: { name: string | null; kind: string } }): string {
+  if (type.name) return type.name;
+  if (type.ofType?.name) return `${type.kind === 'NON_NULL' ? '' : ''}${type.ofType.name}${type.kind === 'LIST' ? '[]' : ''}`;
+  return type.kind;
 }

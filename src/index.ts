@@ -66,12 +66,13 @@ const macroRegistry = new MacroRegistry();
 
 // GraphQL client — initialized async, navigation falls back to REST if unavailable
 const navigation = new NavigationService(client, null);
+let graphqlClient: GraphQLClient | null = null;
 
 discoverCloudId(CONFLUENCE_HOST, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN)
   .then(cloudId => {
     if (cloudId) {
-      const graphql = new GraphQLClient(CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN, cloudId);
-      navigation.setGraphQLClient(graphql);
+      graphqlClient = new GraphQLClient(CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN, cloudId);
+      navigation.setGraphQLClient(graphqlClient);
       console.error(`[confluence-cloud] GraphQL enabled (cloudId: ${cloudId})`);
     } else {
       console.error('[confluence-cloud] GraphQL unavailable — using REST-only mode');
@@ -109,7 +110,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   manage_confluence_space: (args) => handleSpaceRequest(client, args),
   search_confluence: (args) => handleSearchRequest(client, args),
   manage_confluence_media: (args) => handleMediaRequest(client, args),
-  navigate_confluence: (args) => handleNavigateRequest(navigation, args),
+  navigate_confluence: (args) => handleNavigateRequest(navigation, args, graphqlClient),
   queue_confluence_operations: (args) =>
     handleQueueRequest(
       async (toolName, toolArgs) => {
