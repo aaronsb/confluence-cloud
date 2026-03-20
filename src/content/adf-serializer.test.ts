@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { serializeBlocks } from './adf-serializer.js';
+import { parseAdf } from './adf-parser.js';
 import type { Block } from './blocks.js';
 
 describe('serializeBlocks', () => {
@@ -154,6 +155,146 @@ describe('serializeBlocks', () => {
     }];
     const adf = serializeBlocks(blocks);
     expect(adf.content![0]).toEqual(rawNode);
+  });
+
+  // ── Round-trip hardening ────────────────────────────────────
+
+  it('should serialize empty paragraph', () => {
+    const blocks: Block[] = [
+      { type: 'paragraph', text: '', id: '1' },
+    ];
+    const adf = serializeBlocks(blocks);
+    expect(adf.content![0].type).toBe('paragraph');
+    expect(adf.content![0].content).toBeUndefined();
+  });
+
+  it('should round-trip status through parse and serialize', () => {
+    const original = {
+      type: 'doc' as const,
+      content: [{
+        type: 'paragraph',
+        content: [{
+          type: 'status',
+          attrs: { text: 'Done', color: 'green', style: 'bold' },
+        }],
+      }],
+    };
+    const blocks = parseAdf(original);
+    const serialized = serializeBlocks(blocks);
+    const statusNode = serialized.content![0].content![0];
+    expect(statusNode.type).toBe('status');
+    expect(statusNode.attrs?.text).toBe('Done');
+    expect(statusNode.attrs?.color).toBe('green');
+  });
+
+  it('should round-trip panel through parse and serialize', () => {
+    const original = {
+      type: 'doc' as const,
+      content: [{
+        type: 'panel',
+        attrs: { panelType: 'warning' },
+        content: [{
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'Be careful!' }],
+        }],
+      }],
+    };
+    const blocks = parseAdf(original);
+    const serialized = serializeBlocks(blocks);
+    expect(serialized.content![0].type).toBe('panel');
+    expect(serialized.content![0].attrs?.panelType).toBe('warning');
+    expect(serialized.content![0].content![0].content![0].text).toBe('Be careful!');
+  });
+
+  it('should round-trip expand through parse and serialize', () => {
+    const original = {
+      type: 'doc' as const,
+      content: [{
+        type: 'expand',
+        attrs: { title: 'Details' },
+        content: [{
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'Hidden content' }],
+        }],
+      }],
+    };
+    const blocks = parseAdf(original);
+    const serialized = serializeBlocks(blocks);
+    expect(serialized.content![0].type).toBe('expand');
+    expect(serialized.content![0].attrs?.title).toBe('Details');
+  });
+
+  it('should round-trip extension macro through parse and serialize', () => {
+    const original = {
+      type: 'doc' as const,
+      content: [{
+        type: 'extension',
+        attrs: {
+          extensionType: 'com.atlassian.confluence.macro.core',
+          extensionKey: 'jira',
+          parameters: {
+            macroParams: { key: { value: 'PROJ-123' } },
+          },
+        },
+      }],
+    };
+    const blocks = parseAdf(original);
+    const serialized = serializeBlocks(blocks);
+    expect(serialized.content![0].type).toBe('extension');
+    expect(serialized.content![0].attrs?.extensionKey).toBe('jira');
+    const params = serialized.content![0].attrs?.parameters as Record<string, unknown>;
+    expect((params.macroParams as Record<string, { value: string }>).key.value).toBe('PROJ-123');
+  });
+
+  it('should round-trip table with header row', () => {
+    const original = {
+      type: 'doc' as const,
+      content: [{
+        type: 'table',
+        content: [
+          { type: 'tableHeader', content: [
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Col A' }] }] },
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Col B' }] }] },
+          ]},
+          { type: 'tableRow', content: [
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: '1' }] }] },
+            { type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: '2' }] }] },
+          ]},
+        ],
+      }],
+    };
+    const blocks = parseAdf(original);
+    const serialized = serializeBlocks(blocks);
+    const table = serialized.content![0];
+    expect(table.type).toBe('table');
+    expect(table.content![0].type).toBe('tableRow');
+    expect(table.content![0].content![0].type).toBe('tableHeader');
+    expect(table.content![1].content![0].type).toBe('tableCell');
+  });
+
+  it('should round-trip nested list with mixed ordering', () => {
+    const original = {
+      type: 'doc' as const,
+      content: [{
+        type: 'orderedList',
+        content: [{
+          type: 'listItem',
+          content: [
+            { type: 'paragraph', content: [{ type: 'text', text: 'Step 1' }] },
+            { type: 'bulletList', content: [
+              { type: 'listItem', content: [
+                { type: 'paragraph', content: [{ type: 'text', text: 'Sub-item' }] },
+              ]},
+            ]},
+          ],
+        }],
+      }],
+    };
+    const blocks = parseAdf(original);
+    const serialized = serializeBlocks(blocks);
+    expect(serialized.content![0].type).toBe('orderedList');
+    const listItem = serialized.content![0].content![0];
+    expect(listItem.content![1].type).toBe('bulletList');
   });
 
   it('should block javascript: URLs in links', () => {

@@ -249,6 +249,11 @@ function extractText(node: AdfNode): string {
     return `:::status{color="${color}" title="${text}"}:::`;
   }
 
+  // Inline card → render as link
+  if (node.type === 'inlineCard' && node.attrs?.url) {
+    return `[${node.attrs.url}](${node.attrs.url})`;
+  }
+
   if (!node.content) return '';
 
   return node.content.map(extractText).join('');
