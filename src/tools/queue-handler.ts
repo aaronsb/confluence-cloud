@@ -112,12 +112,12 @@ function extractMetadata(text: string, args: Record<string, unknown>): Record<st
   if (typeof args.spaceKey === 'string') meta.spaceKey = args.spaceKey;
   if (typeof args.attachmentId === 'string') meta.attachmentId = args.attachmentId;
 
-  // Extract session handle from pull_for_editing output
-  const sessionMatch = text.match(/Session:\s*([a-f0-9-]+)/);
-  if (sessionMatch) meta.sessionHandle = sessionMatch[1];
+  // Extract scratchpad ID from create or pull_for_editing output
+  const scratchpadMatch = text.match(/Scratchpad:\s*(sp-[a-f0-9-]+)/);
+  if (scratchpadMatch) meta.scratchpadId = scratchpadMatch[1];
 
-  // Extract page ID from "Created page" or similar output patterns
-  const pageIdMatch = text.match(/pageId["\s:]+([0-9]+)/);
+  // Extract page ID from various output patterns
+  const pageIdMatch = text.match(/(?:pageId|Page ID)["\s:]+([0-9]+)/);
   if (pageIdMatch) meta.pageId = pageIdMatch[1];
 
   // Extract version number
