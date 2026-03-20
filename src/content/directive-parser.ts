@@ -13,6 +13,7 @@ import type {
   MacroBlock,
   ListBlock,
   RawAdfBlock,
+  MediaFileBlock,
 } from './blocks.js';
 
 /**
@@ -82,6 +83,18 @@ export function parseDirectives(input: string): Block[] {
           hash: params.hash,
           id: nextId(),
         } satisfies RawAdfBlock);
+        i++;
+        continue;
+      }
+
+      // Special case: media file reference → MediaFileBlock placeholder (ADR-502)
+      if (macroId === 'media' && params.file) {
+        blocks.push({
+          type: 'media_file',
+          file: params.file,
+          alt: params.alt,
+          id: nextId(),
+        } satisfies MediaFileBlock);
         i++;
         continue;
       }

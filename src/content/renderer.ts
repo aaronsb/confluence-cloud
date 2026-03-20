@@ -67,6 +67,8 @@ function renderBlock(block: Block): string {
       return block.hint
         ? `<!-- ${block.hint} -->`
         : '<!-- Unsupported ADF content -->';
+    case 'media_file':
+      return `:::media{file="${block.file}"${block.alt ? ` alt="${block.alt}"` : ''}}:::`;
   }
 }
 

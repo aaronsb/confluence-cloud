@@ -31,6 +31,7 @@ import { handlePageRequest } from './tools/page-handler.js';
 import { handleQueueRequest } from './tools/queue-handler.js';
 import { handleSearchRequest } from './tools/search-handler.js';
 import { handleSpaceRequest } from './tools/space-handler.js';
+import { handleWorkspaceRequest } from './tools/workspace-handler.js';
 import { toolSchemas } from './tools/tool-schemas.js';
 import type { ToolResponse } from './types/index.js';
 
@@ -119,6 +120,7 @@ const toolHandlers: Record<string, ToolHandler> = {
   search_confluence: (args) => handleSearchRequest(client, args),
   manage_confluence_media: (args) => handleMediaRequest(client, args),
   navigate_confluence: (args) => handleNavigateRequest(navigation, args, graphqlClient, client),
+  manage_workspace: (args) => handleWorkspaceRequest(args),
   queue_confluence_operations: (args) =>
     handleQueueRequest(
       async (toolName, toolArgs) => {

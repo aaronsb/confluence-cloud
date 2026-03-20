@@ -48,6 +48,9 @@ function serializeBlock(block: Block): AdfNode[] {
       return [serializeList(block)];
     case 'raw_adf':
       return [serializeRawAdf(block)];
+    case 'media_file':
+      // media_file blocks should be resolved to MediaBlocks before serialization
+      return [];
   }
 }
 
@@ -203,7 +206,7 @@ function serializeMedia(block: MediaBlock): AdfNode {
       type: 'media',
       attrs: {
         id: block.attachmentId,
-        type: block.mediaType,
+        type: 'file',
         collection: '',
         ...(block.alt ? { alt: block.alt } : {}),
         ...(block.width ? { width: block.width } : {}),

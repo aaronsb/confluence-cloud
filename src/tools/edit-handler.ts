@@ -3,13 +3,17 @@
  * See ADR-304: Scratchpad Buffer — Line-Addressed Content Authoring.
  */
 
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+
 import type { ConfluenceClient } from '../client/confluence-client.js';
 import { serializeBlocks } from '../content/adf-serializer.js';
-import type { Block } from '../content/blocks.js';
+import type { Block, MediaFileBlock } from '../content/blocks.js';
 import { parseDirectives } from '../content/directive-parser.js';
 import { getNextSteps } from '../rendering/next-steps.js';
 import type { ScratchpadManager } from '../sessions/scratchpad.js';
 import type { ToolResponse } from '../types/index.js';
+import { resolveWorkspacePath, verifyPathSafety } from '../workspace/index.js';
 
 interface EditArgs {
   operation: string;
@@ -186,52 +190,92 @@ async function handleSubmit(
   const sideTable = scratchpads.getRawAdfSideTable(args.scratchpadId!)!;
   resolveRawAdfPlaceholders(blocks, sideTable);
 
-  // Serialize to ADF
-  const adf = serializeBlocks(blocks);
+  // Collect media_file references and validate workspace files exist
+  const mediaFiles = collectMediaFileBlocks(blocks);
+  for (const mf of mediaFiles) {
+    try {
+      const filePath = resolveWorkspacePath(mf.file);
+      await verifyPathSafety(filePath);
+      await fs.access(filePath);
+    } catch {
+      return {
+        content: [{ type: 'text', text: `Submit failed: workspace file not found: ${mf.file}\nScratchpad ${args.scratchpadId} is still active. Stage the file with manage_workspace write or remove the :::media{file="..."} reference.` }],
+        isError: true,
+      };
+    }
+  }
+
+  // Track partially-created page ID for error reporting
+  let createdPageId: string | undefined;
 
   // Push to Confluence
   try {
     if (sp.target.type === 'new_page') {
-      const page = await client.createPage(
-        sp.target.spaceId,
-        sp.target.title,
-        adf,
-        sp.target.parentId,
-      );
-      scratchpads.discard(args.scratchpadId!);
+      // For new pages with media: create page first, upload attachments, then update with media refs
+      // For new pages without media: single create call
+      if (mediaFiles.length === 0) {
+        const adf = serializeBlocks(blocks);
+        const page = await client.createPage(sp.target.spaceId, sp.target.title, adf, sp.target.parentId);
+        scratchpads.discard(args.scratchpadId!);
+        let text = `Page created successfully.\n\nPage ID: ${page.id}\nTitle: ${page.title}\nVersion: ${page.version.number}`;
+        text += getNextSteps('page_create', { pageId: page.id });
+        return { content: [{ type: 'text', text }] };
+      }
 
-      let text = `Page created successfully.\n\nPage ID: ${page.id}\nTitle: ${page.title}\nVersion: ${page.version.number}`;
-      text += getNextSteps('page_create', { pageId: page.id });
+      // Create page with text-only content (media_file blocks stripped)
+      const textBlocks = stripMediaFileBlocks(blocks);
+      const textAdf = serializeBlocks(textBlocks);
+      const page = await client.createPage(sp.target.spaceId, sp.target.title, textAdf, sp.target.parentId);
+      createdPageId = page.id;
+
+      // Upload workspace files as attachments
+      const uploadResults = await uploadMediaFiles(client, page.id, mediaFiles);
+
+      // Replace media_file blocks with real MediaBlocks
+      resolveMediaFileBlocks(blocks, uploadResults);
+      const finalAdf = serializeBlocks(blocks);
+      const updated = await client.updatePage(page.id, sp.target.title, finalAdf, page.version.number);
+
+      scratchpads.discard(args.scratchpadId!);
+      let text = `Page created with ${uploadResults.size} attachment(s).\n\nPage ID: ${updated.id}\nTitle: ${updated.title}\nVersion: ${updated.version.number}`;
+      text += getNextSteps('page_create', { pageId: updated.id });
       return { content: [{ type: 'text', text }] };
     } else {
-      const page = await client.updatePage(
-        sp.target.pageId,
-        sp.target.title,
-        adf,
-        sp.target.version,
-        args.message,
-      );
+      // Existing page: upload attachments first, then update content
+      const pageId = sp.target.pageId;
+
+      if (mediaFiles.length > 0) {
+        const uploadResults = await uploadMediaFiles(client, pageId, mediaFiles);
+        resolveMediaFileBlocks(blocks, uploadResults);
+      }
+
+      const adf = serializeBlocks(blocks);
+      const page = await client.updatePage(pageId, sp.target.title, adf, sp.target.version, args.message);
       scratchpads.discard(args.scratchpadId!);
 
-      let text = `Page updated successfully.\n\nPage ID: ${page.id}\nTitle: ${page.title}\nVersion: ${page.version.number}`;
+      const mediaNote = mediaFiles.length > 0 ? ` with ${mediaFiles.length} attachment(s)` : '';
+      let text = `Page updated successfully${mediaNote}.\n\nPage ID: ${page.id}\nTitle: ${page.title}\nVersion: ${page.version.number}`;
       text += getNextSteps('page_update', { pageId: page.id });
       return { content: [{ type: 'text', text }] };
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const partialNote = createdPageId
+      ? `\nNote: Page ${createdPageId} was already created but media upload/update failed. Delete it or complete the upload manually.`
+      : '';
 
     if (message.includes('409') || message.includes('Version conflict')) {
       return {
         content: [{
           type: 'text',
-          text: `Submit failed: Version conflict — page was modified since pull.\nScratchpad ${args.scratchpadId} is still active.\nOptions: discard and re-pull to get latest, or try again.`,
+          text: `Submit failed: Version conflict — page was modified since pull.\nScratchpad ${args.scratchpadId} is still active.\nOptions: discard and re-pull to get latest, or try again.${partialNote}`,
         }],
         isError: true,
       };
     }
 
     return {
-      content: [{ type: 'text', text: `Submit failed: ${message}\nScratchpad ${args.scratchpadId} is still active.` }],
+      content: [{ type: 'text', text: `Submit failed: ${message}\nScratchpad ${args.scratchpadId} is still active.${partialNote}` }],
       isError: true,
     };
   }
@@ -291,6 +335,110 @@ function resolveRawAdfPlaceholders(blocks: Block[], sideTable: Map<string, objec
     // Recurse into macro bodies
     if (block.type === 'macro' && block.body) {
       resolveRawAdfPlaceholders(block.body, sideTable);
+    }
+  }
+}
+
+// ── Media File Helpers (ADR-502) ────────────────────────────
+
+/** MIME type lookup by extension. */
+const MIME_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.pdf': 'application/pdf',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.csv': 'text/csv',
+  '.txt': 'text/plain',
+  '.zip': 'application/zip',
+};
+
+/** Collect all MediaFileBlock references from a block tree. */
+function collectMediaFileBlocks(blocks: Block[]): MediaFileBlock[] {
+  const result: MediaFileBlock[] = [];
+  for (const block of blocks) {
+    if (block.type === 'media_file') {
+      result.push(block);
+    }
+    if (block.type === 'section') {
+      result.push(...collectMediaFileBlocks(block.content));
+    }
+    if (block.type === 'macro' && block.body) {
+      result.push(...collectMediaFileBlocks(block.body));
+    }
+  }
+  return result;
+}
+
+/** Return a copy of blocks with media_file blocks removed. */
+function stripMediaFileBlocks(blocks: Block[]): Block[] {
+  return blocks
+    .filter(b => b.type !== 'media_file')
+    .map(b => {
+      if (b.type === 'section') return { ...b, content: stripMediaFileBlocks(b.content) };
+      if (b.type === 'macro' && b.body) return { ...b, body: stripMediaFileBlocks(b.body) };
+      return b;
+    });
+}
+
+/** Upload workspace files as attachments and return file→attachment mapping. */
+async function uploadMediaFiles(
+  client: ConfluenceClient,
+  pageId: string,
+  mediaFiles: MediaFileBlock[],
+): Promise<Map<string, { id: string; mediaType: string }>> {
+  const results = new Map<string, { id: string; mediaType: string }>();
+  const seen = new Set<string>();
+
+  for (const mf of mediaFiles) {
+    if (seen.has(mf.file)) continue;
+    seen.add(mf.file);
+
+    const filePath = resolveWorkspacePath(mf.file);
+    await verifyPathSafety(filePath);
+    const buffer = await fs.readFile(filePath);
+    const ext = path.extname(mf.file).toLowerCase();
+    const mediaType = MIME_TYPES[ext] || 'application/octet-stream';
+
+    const attachment = await client.uploadAttachment(pageId, mf.file, buffer, mediaType);
+    results.set(mf.file, { id: attachment.id, mediaType });
+  }
+
+  return results;
+}
+
+/** Replace media_file blocks in-place with proper MediaBlocks. */
+function resolveMediaFileBlocks(
+  blocks: Block[],
+  uploadResults: Map<string, { id: string; mediaType: string }>,
+): void {
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    if (block.type === 'media_file') {
+      const result = uploadResults.get(block.file);
+      if (result) {
+        // Replace in-place with a MediaBlock
+        (blocks as unknown[])[i] = {
+          type: 'media',
+          attachmentId: result.id,
+          filename: block.file,
+          mediaType: result.mediaType,
+          alt: block.alt,
+          id: block.id,
+        };
+      }
+    }
+    if (block.type === 'section') {
+      resolveMediaFileBlocks(block.content, uploadResults);
+    }
+    if (block.type === 'macro' && block.body) {
+      resolveMediaFileBlocks(block.body, uploadResults);
     }
   }
 }

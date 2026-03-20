@@ -1,7 +1,7 @@
 export { type Block } from './blocks.js';
 export type {
   SectionBlock, ParagraphBlock, TableBlock, CodeBlock,
-  MacroBlock, MediaBlock, ListBlock, RawAdfBlock, ListItem,
+  MacroBlock, MediaBlock, MediaFileBlock, ListBlock, RawAdfBlock, ListItem,
 } from './blocks.js';
 export { parseAdf, type AdfNode } from './adf-parser.js';
 export { serializeBlocks } from './adf-serializer.js';

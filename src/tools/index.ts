@@ -6,3 +6,4 @@ export { handleSearchRequest } from './search-handler.js';
 export { handleMediaRequest } from './media-handler.js';
 export { handleNavigateRequest } from './navigate-handler.js';
 export { handleQueueRequest } from './queue-handler.js';
+export { handleWorkspaceRequest } from './workspace-handler.js';

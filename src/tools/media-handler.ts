@@ -2,10 +2,19 @@
  * Handler for manage_confluence_media tool.
  */
 
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+
 import type { ConfluenceClient } from '../client/confluence-client.js';
 import { renderAttachmentList } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
 import type { ToolResponse } from '../types/index.js';
+import {
+  ensureWorkspaceDir,
+  resolveWorkspacePath,
+  verifyPathSafety,
+  sanitizeFilename,
+} from '../workspace/index.js';
 
 interface MediaArgs {
   operation: string;
@@ -14,6 +23,7 @@ interface MediaArgs {
   filename?: string;
   content?: string;
   mediaType?: string;
+  workspaceFile?: string;
 }
 
 export async function handleMediaRequest(
@@ -32,15 +42,33 @@ export async function handleMediaRequest(
     }
 
     case 'upload': {
-      if (!args.pageId || !args.filename || !args.content || !args.mediaType) {
+      if (!args.pageId || !args.filename || !args.mediaType) {
         return {
-          content: [{ type: 'text', text: 'pageId, filename, content (base64), and mediaType are required for upload' }],
+          content: [{ type: 'text', text: 'pageId, filename, and mediaType are required for upload' }],
           isError: true,
         };
       }
-      const buffer = Buffer.from(args.content, 'base64');
+
+      let buffer: Buffer;
+      if (args.workspaceFile) {
+        const filePath = resolveWorkspacePath(args.workspaceFile);
+        await verifyPathSafety(filePath);
+        try {
+          buffer = await fs.readFile(filePath);
+        } catch {
+          return { content: [{ type: 'text', text: `Workspace file not found: ${args.workspaceFile}` }], isError: true };
+        }
+      } else if (args.content) {
+        buffer = Buffer.from(args.content, 'base64');
+      } else {
+        return {
+          content: [{ type: 'text', text: 'Either content (base64) or workspaceFile is required for upload' }],
+          isError: true,
+        };
+      }
+
       const attachment = await client.uploadAttachment(args.pageId, args.filename, buffer, args.mediaType);
-      let text = `Uploaded: 📎 ${attachment.title} | ${attachment.mediaType} | ${attachment.fileSize}B`;
+      let text = `Uploaded: ${attachment.title} | ${attachment.mediaType} | ${attachment.fileSize}B`;
       text += getNextSteps('media_upload', { pageId: args.pageId });
       return { content: [{ type: 'text', text }] };
     }
@@ -97,8 +125,30 @@ export async function handleMediaRequest(
       };
     }
 
-    case 'download':
-      return { content: [{ type: 'text', text: `Operation 'download' is not yet implemented.` }] };
+    case 'download': {
+      if (!args.attachmentId) {
+        return { content: [{ type: 'text', text: 'attachmentId is required for download operation' }], isError: true };
+      }
+      const dlInfo = await client.getAttachmentInfo(args.attachmentId);
+      const dlBytes = await client.downloadAttachment(args.attachmentId);
+
+      const status = await ensureWorkspaceDir();
+      if (!status.valid) {
+        return { content: [{ type: 'text', text: `Workspace invalid: ${status.warning}` }], isError: true };
+      }
+
+      const dlFilename = args.filename || sanitizeFilename(dlInfo.title);
+      const dlPath = resolveWorkspacePath(dlFilename);
+      await verifyPathSafety(dlPath);
+      await fs.writeFile(dlPath, dlBytes);
+
+      return {
+        content: [{
+          type: 'text',
+          text: `Downloaded: ${dlFilename} | ${dlInfo.mediaType} | ${dlBytes.length}B\nSaved to workspace. Use manage_workspace read or manage_confluence_media upload with workspaceFile:"${dlFilename}" to use it.`,
+        }],
+      };
+    }
 
     default:
       return { content: [{ type: 'text', text: `Unknown media operation: ${args.operation}` }], isError: true };
