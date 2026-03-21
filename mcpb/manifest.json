@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "confluence-cloud-mcp",
   "display_name": "Confluence Cloud",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Structured page editing, macro support, graph navigation, and session-based content management for Confluence Cloud",
   "author": {
     "name": "aaronsb",
