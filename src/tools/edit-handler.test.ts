@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import type { ConfluenceClient } from '../client/confluence-client.js';
 import type { Page } from '../types/index.js';
 import { ScratchpadManager } from '../sessions/scratchpad.js';
@@ -311,5 +314,126 @@ describe('handleEditRequest', () => {
     // Should still succeed — unresolved raw_adf serializes as empty object
     expect(result.isError).toBeUndefined();
     expect(capturedBody).toBeDefined();
+  });
+
+  // ── Submit: media file resolution (ADR-502) ──────────
+
+  describe('media file submit', () => {
+    let tmpDir: string;
+    const originalWD = process.env.WORKSPACE_DIR;
+
+    beforeEach(async () => {
+      tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'edit-media-'));
+      process.env.WORKSPACE_DIR = tmpDir;
+    });
+
+    afterEach(async () => {
+      if (originalWD !== undefined) process.env.WORKSPACE_DIR = originalWD;
+      else delete process.env.WORKSPACE_DIR;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it('should upload workspace files and resolve media references on new page submit', async () => {
+      await fs.writeFile(path.join(tmpDir, 'diagram.png'), Buffer.from('png-data'));
+
+      let createCallCount = 0;
+      let updateBody: object | undefined;
+      const mediaClient = fakeClient({
+        createPage: async () => {
+          createCallCount++;
+          return fakePage({ id: '55555', version: { number: 1, createdAt: '', authorId: '' } });
+        },
+        updatePage: async (_id, _title, body) => {
+          updateBody = body;
+          return fakePage({ id: '55555', version: { number: 2, createdAt: '', authorId: '' } });
+        },
+        uploadAttachment: async (_pageId, filename) => ({
+          id: 'att-001', title: filename, mediaType: 'image/png', fileSize: 8,
+          downloadUrl: '/dl', pageId: '55555', version: 1, createdAt: '',
+        }),
+      });
+
+      const id = scratchpads.createFromLines(
+        { type: 'new_page', spaceId: 'S1', title: 'Media Page' },
+        ['# Page with Image', '', ':::media{file="diagram.png" alt="Diagram"}:::'],
+      );
+
+      const result = await handleEditRequest(mediaClient, scratchpads, {
+        operation: 'submit',
+        scratchpadId: id,
+      });
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('1 attachment(s)');
+      expect(createCallCount).toBe(1);
+      expect(updateBody).toBeDefined();
+      expect(scratchpads.get(id)).toBeNull();
+    });
+
+    it('should upload workspace files before updating existing page', async () => {
+      await fs.writeFile(path.join(tmpDir, 'photo.jpg'), Buffer.from('jpg-data'));
+
+      let uploadCalled = false;
+      const mediaClient = fakeClient({
+        uploadAttachment: async () => {
+          uploadCalled = true;
+          return {
+            id: 'att-002', title: 'photo.jpg', mediaType: 'image/jpeg', fileSize: 8,
+            downloadUrl: '/dl', pageId: '12345', version: 1, createdAt: '',
+          };
+        },
+        updatePage: async () => {
+          // Upload should have happened before this
+          expect(uploadCalled).toBe(true);
+          return fakePage({ version: { number: 3, createdAt: '', authorId: '' } });
+        },
+      });
+
+      const id = scratchpads.createFromLines(
+        { type: 'existing_page', pageId: '12345', version: 2, title: 'Existing' },
+        ['# Updated Page', '', ':::media{file="photo.jpg"}:::'],
+      );
+
+      const result = await handleEditRequest(mediaClient, scratchpads, {
+        operation: 'submit',
+        scratchpadId: id,
+      });
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('1 attachment(s)');
+    });
+
+    it('should reject submit when workspace file is missing', async () => {
+      const id = scratchpads.createFromLines(
+        { type: 'new_page', spaceId: 'S1', title: 'Missing Media' },
+        ['# Page', '', ':::media{file="nonexistent.png"}:::'],
+      );
+
+      const result = await handleEditRequest(client, scratchpads, {
+        operation: 'submit',
+        scratchpadId: id,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('workspace file not found');
+      expect(result.content[0].text).toContain('nonexistent.png');
+      // Scratchpad should persist
+      expect(scratchpads.get(id)).not.toBeNull();
+    });
+
+    it('should submit normally when no media files referenced', async () => {
+      const id = scratchpads.createFromLines(
+        { type: 'new_page', spaceId: 'S1', title: 'Text Only' },
+        ['# Just Text', '', 'No media here.'],
+      );
+
+      const result = await handleEditRequest(client, scratchpads, {
+        operation: 'submit',
+        scratchpadId: id,
+      });
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('Page created successfully');
+    });
   });
 });

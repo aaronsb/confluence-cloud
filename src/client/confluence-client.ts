@@ -88,9 +88,14 @@ export class ConfluenceRestClient implements ConfluenceClient {
    * Respects Retry-After header when present.
    */
   private async fetchWithRetry<T>(url: string, options?: RequestInit, attempt = 0): Promise<T> {
+    const mergedHeaders = { ...this.headers, ...options?.headers } as Record<string, string>;
+    // FormData sets Content-Type with multipart boundary automatically — don't override it
+    if (options?.body instanceof FormData) {
+      delete mergedHeaders['Content-Type'];
+    }
     const response = await fetch(url, {
       ...options,
-      headers: { ...this.headers, ...options?.headers },
+      headers: mergedHeaders,
     });
 
     // Retryable status — backoff with jitter, respect Retry-After
@@ -294,15 +299,27 @@ export class ConfluenceRestClient implements ConfluenceClient {
     const formData = new FormData();
     formData.append('file', new Blob([new Uint8Array(content)], { type: mediaType }), filename);
 
-    const raw = await this.request<ConfluenceV2Attachment>(`/pages/${pageId}/attachments`, {
+    // Use v1 endpoint — v2 attachment creation is unreliable
+    const raw = await this.requestV1<{ results: ConfluenceV1Attachment[] }>(`/content/${pageId}/child/attachment`, {
       method: 'POST',
       headers: {
         'Authorization': this.headers['Authorization'],
+        'Accept': 'application/json',
         'X-Atlassian-Token': 'nocheck',
       },
       body: formData as unknown as BodyInit,
     });
-    return mapAttachment(raw);
+    const att = raw.results[0];
+    return {
+      id: att.id,
+      title: att.title,
+      mediaType: att.metadata?.mediaType || mediaType,
+      fileSize: att.extensions?.fileSize ? Number(att.extensions.fileSize) : content.length,
+      downloadUrl: att._links?.download || '',
+      pageId,
+      version: att.version?.number || 1,
+      createdAt: att.version?.when || '',
+    };
   }
 
   async deleteAttachment(id: string): Promise<void> {
@@ -411,6 +428,15 @@ interface ConfluenceV2Space {
   status: string;
   description?: { plain?: { value: string } };
   homepageId?: string;
+}
+
+interface ConfluenceV1Attachment {
+  id: string;
+  title: string;
+  metadata?: { mediaType?: string };
+  extensions?: { fileSize?: string };
+  version?: { number: number; when?: string };
+  _links?: { download?: string };
 }
 
 interface ConfluenceV2Attachment {

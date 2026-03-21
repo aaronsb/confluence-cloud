@@ -12,6 +12,7 @@ export type Block =
   | CodeBlock
   | MacroBlock
   | MediaBlock
+  | MediaFileBlock
   | ListBlock
   | RawAdfBlock;
 
@@ -82,6 +83,13 @@ export interface ListItem {
   text: string;
   children?: ListItem[];
   childrenOrdered?: boolean;
+}
+
+export interface MediaFileBlock {
+  type: 'media_file';
+  file: string;
+  alt?: string;
+  id?: string;
 }
 
 export interface RawAdfBlock {

@@ -210,11 +210,15 @@ export const toolSchemas: Record<string, ToolSchema> = {
         },
         content: {
           type: 'string',
-          description: 'Base64-encoded file content for upload',
+          description: 'Base64-encoded file content for upload (or use workspaceFile instead)',
         },
         mediaType: {
           type: 'string',
           description: 'MIME type for upload (e.g., image/png)',
+        },
+        workspaceFile: {
+          type: 'string',
+          description: 'Read file from workspace instead of base64 content (alternative to content for upload)',
         },
       },
       required: ['operation'],
@@ -287,6 +291,30 @@ export const toolSchemas: Record<string, ToolSchema> = {
         },
       },
       required: ['operations'],
+    },
+  },
+
+  manage_workspace: {
+    name: 'manage_workspace',
+    description: 'Stage files in the local workspace for attachment operations. List, read, write, or delete files. Downloaded attachments land here; upload can read from here. Workspace files can be referenced in scratchpad content with :::media{file="name"}::: for atomic page-with-media publishing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        operation: {
+          type: 'string',
+          enum: ['list', 'read', 'write', 'delete'],
+          description: 'The workspace operation to perform',
+        },
+        filename: {
+          type: 'string',
+          description: 'Filename (required for read, write, delete)',
+        },
+        content: {
+          type: 'string',
+          description: 'Base64-encoded file content (required for write)',
+        },
+      },
+      required: ['operation'],
     },
   },
 };
