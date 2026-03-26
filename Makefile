@@ -74,19 +74,14 @@ mcpb: build     ## Build .mcpb desktop extension bundle
 
 # ── Publishing ──────────────────────────────────────────────────────────
 
-publish-all: mcpb  ## Publish to npm, MCP Registry, GitHub Release, and MCPB
+publish-all: mcpb  ## Publish to MCP Registry, GitHub Release with MCPB (npm is CI-only)
 	@echo ""
 	@echo "Publishing v$(VERSION) to all channels."
-	@echo "  1. npm (requires OTP or trusted publisher)"
-	@echo "  2. MCP Registry (requires GitHub auth)"
-	@echo "  3. GitHub Release"
+	@echo "  npm: handled by GitHub Actions on tag push"
+	@echo "  1. MCP Registry (requires GitHub auth)"
+	@echo "  2. GitHub Release + MCPB bundle"
 	@echo ""
 	@read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ] || (echo "Aborted." && exit 1)
-	@echo ""
-	@echo "── npm ──"
-	@read -p "npm OTP (or press enter for trusted publisher): " otp; \
-	if [ -z "$$otp" ]; then npm publish --access public; \
-	else npm publish --access public --otp "$$otp"; fi
 	@echo ""
 	@echo "── MCP Registry ──"
 	mcp-publisher login github
