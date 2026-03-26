@@ -14,6 +14,7 @@ interface PageArgs {
   operation: string;
   pageId?: string;
   spaceId?: string;
+  spaceKey?: string;
   title?: string;
   parentId?: string;
   expand?: string[];
@@ -40,8 +41,17 @@ export async function handlePageRequest(
     case 'pull_for_editing':
       return handlePullForEditing(client, scratchpads, args);
     case 'move':
+      return handleMove(client, args);
     case 'copy':
-      return { content: [{ type: 'text', text: `Operation '${args.operation}' is not yet implemented.` }] };
+      return handleCopy(client, args);
+    case 'archive':
+      return handleArchive(client, args);
+    case 'archive_tree':
+      return handleArchiveTree(client, args);
+    case 'unarchive':
+      return handleUnarchive(client, args);
+    case 'list_archived':
+      return handleListArchived(client, args);
     case 'get_versions':
       return handleGetVersions(client, args);
     case 'get_labels':
@@ -280,4 +290,108 @@ async function handleDeleteProperty(client: ConfluenceClient, args: PageArgs): P
   }
   await client.deleteProperty(args.pageId, args.propertyKey);
   return { content: [{ type: 'text', text: `Deleted property "${args.propertyKey}" from page ${args.pageId}.` }] };
+}
+
+// ── Move / Copy ─────────────────────────────────────────────
+
+async function handleMove(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for move operation' }], isError: true };
+  }
+  if (!args.parentId) {
+    return { content: [{ type: 'text', text: 'parentId is required for move operation (the new parent page)' }], isError: true };
+  }
+
+  const page = await client.movePage(args.pageId, args.parentId);
+  let text = `Moved page "${page.title}" (${page.id}) under parent ${args.parentId}.`;
+  text += getNextSteps('page_move', { pageId: page.id });
+  return { content: [{ type: 'text', text }] };
+}
+
+async function handleCopy(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for copy operation' }], isError: true };
+  }
+
+  const page = await client.copyPage(args.pageId, args.spaceId, args.parentId, args.title);
+  let text = `Copied page as "${page.title}" (${page.id}).`;
+  if (args.spaceId) text += ` Destination space: ${args.spaceId}.`;
+  if (args.parentId) text += ` Under parent: ${args.parentId}.`;
+  text += getNextSteps('page_copy', { pageId: page.id });
+  return { content: [{ type: 'text', text }] };
+}
+
+// ── Archive ─────────────────────────────────────────────────
+
+async function handleArchive(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for archive operation' }], isError: true };
+  }
+
+  const page = await client.archivePage(args.pageId);
+  let text = `Archived page "${page.title}" (${page.id}).`;
+  text += `\n\nThe page is now hidden from normal navigation and search. It can be restored with unarchive.`;
+  text += getNextSteps('page_archive', { pageId: page.id });
+  return { content: [{ type: 'text', text }] };
+}
+
+async function handleArchiveTree(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for archive_tree operation' }], isError: true };
+  }
+
+  // Fetch page info first for a meaningful response
+  const page = await client.getPage(args.pageId);
+  await client.archivePageTree(args.pageId);
+  let text = `Archive requested for page tree rooted at "${page.title}" (${page.id}).`;
+  text += `\n\nArchiving runs asynchronously — the page and its descendants will be archived shortly.`;
+  text += getNextSteps('page_archive', { pageId: page.id });
+  return { content: [{ type: 'text', text }] };
+}
+
+async function handleUnarchive(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for unarchive operation' }], isError: true };
+  }
+
+  const page = await client.unarchivePage(args.pageId, args.parentId);
+  let text = `Restored page "${page.title}" (${page.id}) from archive.`;
+  text += `\n\nThe page is now visible in normal navigation and search again.`;
+  text += getNextSteps('page_unarchive', { pageId: page.id });
+  return { content: [{ type: 'text', text }] };
+}
+
+async function handleListArchived(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.spaceKey && !args.spaceId) {
+    return { content: [{ type: 'text', text: 'spaceKey or spaceId is required for list_archived operation' }], isError: true };
+  }
+
+  // CQL requires space key, not ID — resolve if needed
+  let spaceKey = args.spaceKey;
+  if (!spaceKey && args.spaceId) {
+    const space = await client.getSpace(args.spaceId);
+    spaceKey = space.key;
+  }
+  const cql = `type = page AND space = "${spaceKey}" ORDER BY lastmodified DESC`;
+  const result = await client.searchByCql(cql, {
+    limit: 50,
+    cqlcontext: { contentStatuses: ['archived'] },
+  });
+
+  if (result.results.length === 0) {
+    return { content: [{ type: 'text', text: 'No archived pages found in this space.' }] };
+  }
+
+  const lines = [
+    `Found ${result.results.length} archived page(s):`,
+    '',
+    '| Page ID | Title | Last Modified |',
+    '|---------|-------|---------------|',
+    ...result.results.map(r =>
+      `| ${r.content.id} | ${r.content.title} | ${r.lastModified} |`
+    ),
+    '',
+    'Use `unarchive` with a pageId to restore a page.',
+  ];
+  return { content: [{ type: 'text', text: lines.join('\n') }] };
 }

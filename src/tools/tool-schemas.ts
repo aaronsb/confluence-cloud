@@ -12,22 +12,26 @@ export interface ToolSchema {
 export const toolSchemas: Record<string, ToolSchema> = {
   manage_confluence_page: {
     name: 'manage_confluence_page',
-    description: 'Get, create, update, delete, move, copy, or pull pages for editing. Manage labels and content properties. Create returns a scratchpad for composing content before publishing. Use pull_for_editing to load existing page content into a scratchpad.',
+    description: 'Get, create, update, delete, move, copy, archive, or pull pages for editing. Manage labels and content properties. Create returns a scratchpad for composing content before publishing. Use pull_for_editing to load existing page content into a scratchpad. Archive/unarchive pages or entire page trees.',
     inputSchema: {
       type: 'object',
       properties: {
         operation: {
           type: 'string',
-          enum: ['get', 'create', 'update', 'delete', 'move', 'copy', 'get_versions', 'pull_for_editing', 'get_labels', 'add_labels', 'remove_label', 'get_properties', 'get_property', 'set_property', 'delete_property'],
+          enum: ['get', 'create', 'update', 'delete', 'move', 'copy', 'get_versions', 'pull_for_editing', 'get_labels', 'add_labels', 'remove_label', 'get_properties', 'get_property', 'set_property', 'delete_property', 'archive', 'archive_tree', 'unarchive', 'list_archived'],
           description: 'The operation to perform',
         },
         pageId: {
           type: 'string',
-          description: 'Page ID (required for get, update, delete, move, copy, get_versions, pull_for_editing)',
+          description: 'Page ID (required for get, update, delete, move, copy, get_versions, pull_for_editing, archive, archive_tree, unarchive)',
         },
         spaceId: {
           type: 'string',
-          description: 'Space ID (required for create)',
+          description: 'Space ID (required for create, usable for list_archived)',
+        },
+        spaceKey: {
+          type: 'string',
+          description: 'Space key (for list_archived)',
         },
         title: {
           type: 'string',
@@ -35,7 +39,7 @@ export const toolSchemas: Record<string, ToolSchema> = {
         },
         parentId: {
           type: 'string',
-          description: 'Parent page ID (optional for create/move)',
+          description: 'Parent page ID (optional for create, required for move, optional for copy)',
         },
         expand: {
           type: 'array',

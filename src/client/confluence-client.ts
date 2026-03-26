@@ -36,7 +36,7 @@ export interface ConfluenceClient {
   listSpaces(options?: PaginationOptions): Promise<PaginatedResponse<Space>>;
 
   // Search
-  searchByCql(cql: string, options?: PaginationOptions): Promise<SearchResult>;
+  searchByCql(cql: string, options?: PaginationOptions & { cqlcontext?: Record<string, unknown> }): Promise<SearchResult>;
 
   // Attachments
   getAttachments(pageId: string, options?: PaginationOptions): Promise<PaginatedResponse<Attachment>>;
@@ -56,6 +56,15 @@ export interface ConfluenceClient {
   getProperty(pageId: string, key: string): Promise<ContentProperty>;
   setProperty(pageId: string, key: string, value: Record<string, unknown>): Promise<ContentProperty>;
   deleteProperty(pageId: string, key: string): Promise<void>;
+
+  // Move / Copy
+  movePage(id: string, parentId: string): Promise<Page>;
+  copyPage(id: string, destinationSpaceId?: string, parentId?: string, title?: string): Promise<Page>;
+
+  // Archive
+  archivePage(id: string): Promise<Page>;
+  archivePageTree(id: string): Promise<{ pagesArchived: number }>;
+  unarchivePage(id: string, parentId?: string): Promise<Page>;
 }
 
 // ── Client ────────────────────────────────────────────────────
@@ -228,11 +237,12 @@ export class ConfluenceRestClient implements ConfluenceClient {
 
   // ── Search ─────────────────────────────────────────────────
 
-  async searchByCql(cql: string, options?: PaginationOptions): Promise<SearchResult> {
+  async searchByCql(cql: string, options?: PaginationOptions & { cqlcontext?: Record<string, unknown> }): Promise<SearchResult> {
     // CQL search is a v1 API endpoint
     const params = new URLSearchParams({ cql });
     if (options?.cursor) params.set('cursor', options.cursor);
     if (options?.limit) params.set('limit', String(options.limit));
+    if (options?.cqlcontext) params.set('cqlcontext', JSON.stringify(options.cqlcontext));
     const raw = await this.requestV1<ConfluenceV1SearchResponse>(
       `/search?${params.toString()}`
     );
@@ -402,6 +412,129 @@ export class ConfluenceRestClient implements ConfluenceClient {
 
   async deleteProperty(pageId: string, key: string): Promise<void> {
     await this.request(`/pages/${pageId}/properties/${encodeURIComponent(key)}`, { method: 'DELETE' });
+  }
+
+  // ── Move / Copy ──────────────────────────────────────────────
+
+  async movePage(id: string, parentId: string): Promise<Page> {
+    const host = this.baseUrl.replace('/wiki/api/v2', '');
+    const mutation = `mutation MovePageMutation($input: MovePageAsChildInput!) {
+      movePageAppend(input: $input) {
+        movedPage
+      }
+    }`;
+    const response = await fetch(`${host}/cgraphql?q=MovePageMutation`, {
+      method: 'POST',
+      headers: { ...this.headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify([{
+        operationName: 'MovePageMutation',
+        variables: { input: { pageId: id, parentId } },
+        query: mutation,
+      }]),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Confluence GraphQL error ${response.status}: ${body}`);
+    }
+    const result = await response.json() as Array<{ data?: { movePageAppend?: { movedPage: { id: string; title: string } } }; errors?: Array<{ message: string }> }>;
+    if (result[0]?.errors?.length) {
+      throw new Error(`Move failed: ${result[0].errors.map(e => e.message).join('; ')}`);
+    }
+    return this.getPage(id);
+  }
+
+  async copyPage(id: string, destinationSpaceId?: string, parentId?: string, title?: string): Promise<Page> {
+    // v1 copy endpoint: POST /content/{id}/copy
+    const destination: Record<string, unknown> = { type: 'parent_page' };
+    if (parentId) destination.value = parentId;
+    const payload: Record<string, unknown> = {
+      destination,
+      copyAttachments: true,
+      copyLabels: true,
+      copyProperties: true,
+    };
+    if (title) payload.pageTitle = title;
+    const raw = await this.requestV1<ConfluenceV1Content>(`/content/${id}/copy`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    // Copy returns v1 content — map it
+    return mapV1Content(raw);
+  }
+
+  // ── Archive ─────────────────────────────────────────────────
+
+  async archivePage(id: string): Promise<Page> {
+    const page = await this.getPage(id);
+    await this.archiveViaGraphQL([id], false);
+    return { ...page, status: 'archived' };
+  }
+
+  async archivePageTree(id: string): Promise<{ pagesArchived: number }> {
+    await this.archiveViaGraphQL([id], true);
+    return { pagesArchived: -1 };
+  }
+
+  private async archiveViaGraphQL(pageIDs: string[], includeChildren: boolean, archiveNote?: string): Promise<void> {
+    const host = this.baseUrl.replace('/wiki/api/v2', '');
+    const mutation = `mutation ArchivePagesMutation($pageIDs: [Long!]!, $includeChildren: [Boolean!]!, $archiveNote: String) {
+      bulkArchivePages(pageIDs: $pageIDs, includeChildren: $includeChildren, archiveNote: $archiveNote) {
+        taskId
+        status
+      }
+    }`;
+    const variables: Record<string, unknown> = { pageIDs, includeChildren: [includeChildren] };
+    if (archiveNote) variables.archiveNote = archiveNote;
+    const response = await fetch(`${host}/cgraphql?q=ArchivePagesMutation`, {
+      method: 'POST',
+      headers: { ...this.headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ operationName: 'ArchivePagesMutation', variables, query: mutation }]),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Confluence GraphQL error ${response.status}: ${body}`);
+    }
+    const result = await response.json() as Array<{ data?: { bulkArchivePages?: { status: boolean } }; errors?: Array<{ message: string }> }>;
+    if (result[0]?.errors?.length) {
+      throw new Error(`Archive failed: ${result[0].errors.map(e => e.message).join('; ')}`);
+    }
+  }
+
+  async unarchivePage(id: string, parentId?: string): Promise<Page> {
+    // Confluence Cloud requires the internal GraphQL endpoint for unarchiving
+    // REST PUT with status=current returns 403 for archived pages
+    const host = this.baseUrl.replace('/wiki/api/v2', '');
+    const url = `${host}/cgraphql?q=UnarchivePagesMutation`;
+    const mutation = `mutation UnarchivePagesMutation($pageIDs: [Long!]!, $includeChildren: [Boolean!]!, $parentPageId: Long) {
+      bulkUnarchivePages(pageIDs: $pageIDs, includeChildren: $includeChildren, parentPageId: $parentPageId) {
+        taskId
+        status
+      }
+    }`;
+    const variables: Record<string, unknown> = {
+      pageIDs: [id],
+      includeChildren: [false],
+    };
+    if (parentId) variables.parentPageId = parentId;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        ...this.headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify([{ operationName: 'UnarchivePagesMutation', variables, query: mutation }]),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Confluence GraphQL error ${response.status}: ${body}`);
+    }
+    const result = await response.json() as Array<{ data?: { bulkUnarchivePages?: { status: boolean } }; errors?: Array<{ message: string }> }>;
+    if (result[0]?.errors?.length) {
+      throw new Error(`Unarchive failed: ${result[0].errors.map(e => e.message).join('; ')}`);
+    }
+    // Unarchive is async — give it a moment, then fetch the page
+    await sleep(1000);
+    return this.getPage(id);
   }
 }
 
