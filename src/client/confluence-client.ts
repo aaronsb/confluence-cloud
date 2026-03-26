@@ -36,7 +36,7 @@ export interface ConfluenceClient {
   listSpaces(options?: PaginationOptions): Promise<PaginatedResponse<Space>>;
 
   // Search
-  searchByCql(cql: string, options?: PaginationOptions): Promise<SearchResult>;
+  searchByCql(cql: string, options?: PaginationOptions & { cqlcontext?: Record<string, unknown> }): Promise<SearchResult>;
 
   // Attachments
   getAttachments(pageId: string, options?: PaginationOptions): Promise<PaginatedResponse<Attachment>>;
@@ -56,6 +56,15 @@ export interface ConfluenceClient {
   getProperty(pageId: string, key: string): Promise<ContentProperty>;
   setProperty(pageId: string, key: string, value: Record<string, unknown>): Promise<ContentProperty>;
   deleteProperty(pageId: string, key: string): Promise<void>;
+
+  // Move / Copy
+  movePage(id: string, parentId: string): Promise<Page>;
+  copyPage(id: string, destinationSpaceId?: string, parentId?: string, title?: string): Promise<Page>;
+
+  // Archive
+  archivePage(id: string): Promise<Page>;
+  archivePageTree(id: string): Promise<void>;
+  unarchivePage(id: string, parentId?: string): Promise<Page>;
 }
 
 // ── Client ────────────────────────────────────────────────────
@@ -63,11 +72,13 @@ export interface ConfluenceClient {
 export class ConfluenceRestClient implements ConfluenceClient {
   private baseUrl: string;
   private baseUrlV1: string;
+  private cgraphqlUrl: string;
   private headers: Record<string, string>;
 
   constructor(config: ConfluenceConfig) {
     this.baseUrl = `${config.host}/wiki/api/v2`;
     this.baseUrlV1 = `${config.host}/wiki/rest/api`;
+    this.cgraphqlUrl = `${config.host}/cgraphql`;
     this.headers = {
       'Authorization': `Basic ${Buffer.from(`${config.email}:${config.apiToken}`).toString('base64')}`,
       'Content-Type': 'application/json',
@@ -81,6 +92,29 @@ export class ConfluenceRestClient implements ConfluenceClient {
 
   private async requestV1<T>(path: string, options?: RequestInit): Promise<T> {
     return this.fetchWithRetry<T>(`${this.baseUrlV1}${path}`, options);
+  }
+
+  /**
+   * Execute a mutation against the Confluence GraphQL gateway (/cgraphql).
+   * Uses fetchWithRetry for rate-limit and 5xx protection.
+   */
+  private async requestCGraphQL<T>(
+    operationName: string,
+    query: string,
+    variables: Record<string, unknown>,
+  ): Promise<T> {
+    const results = await this.fetchWithRetry<Array<{ data?: T; errors?: Array<{ message: string }> }>>(
+      `${this.cgraphqlUrl}?q=${operationName}`,
+      {
+        method: 'POST',
+        body: JSON.stringify([{ operationName, variables, query }]),
+      },
+    );
+    const result = results[0];
+    if (result?.errors?.length) {
+      throw new Error(`GraphQL ${operationName}: ${result.errors.map(e => e.message).join('; ')}`);
+    }
+    return result.data as T;
   }
 
   /**
@@ -228,11 +262,12 @@ export class ConfluenceRestClient implements ConfluenceClient {
 
   // ── Search ─────────────────────────────────────────────────
 
-  async searchByCql(cql: string, options?: PaginationOptions): Promise<SearchResult> {
+  async searchByCql(cql: string, options?: PaginationOptions & { cqlcontext?: Record<string, unknown> }): Promise<SearchResult> {
     // CQL search is a v1 API endpoint
     const params = new URLSearchParams({ cql });
     if (options?.cursor) params.set('cursor', options.cursor);
     if (options?.limit) params.set('limit', String(options.limit));
+    if (options?.cqlcontext) params.set('cqlcontext', JSON.stringify(options.cqlcontext));
     const raw = await this.requestV1<ConfluenceV1SearchResponse>(
       `/search?${params.toString()}`
     );
@@ -402,6 +437,96 @@ export class ConfluenceRestClient implements ConfluenceClient {
 
   async deleteProperty(pageId: string, key: string): Promise<void> {
     await this.request(`/pages/${pageId}/properties/${encodeURIComponent(key)}`, { method: 'DELETE' });
+  }
+
+  // ── Move / Copy ──────────────────────────────────────────────
+
+  async movePage(id: string, parentId: string): Promise<Page> {
+    await this.requestCGraphQL(
+      'MovePageMutation',
+      `mutation MovePageMutation($input: MovePageAsChildInput!) {
+        movePageAppend(input: $input) { movedPage }
+      }`,
+      { input: { pageId: id, parentId } },
+    );
+    return this.getPage(id);
+  }
+
+  async copyPage(id: string, destinationSpaceId?: string, parentId?: string, title?: string): Promise<Page> {
+    // v1 copy endpoint: POST /content/{id}/copy (no GraphQL equivalent)
+    const destination: Record<string, unknown> = { type: 'parent_page' };
+    if (parentId) destination.value = parentId;
+    if (destinationSpaceId) destination.spaceId = destinationSpaceId;
+    const payload: Record<string, unknown> = {
+      destination,
+      copyAttachments: true,
+      copyLabels: true,
+      copyProperties: true,
+    };
+    if (title) payload.pageTitle = title;
+    const raw = await this.requestV1<ConfluenceV1Content>(`/content/${id}/copy`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    // Copy returns v1 content — map it
+    return mapV1Content(raw);
+  }
+
+  // ── Archive ─────────────────────────────────────────────────
+
+  async archivePage(id: string): Promise<Page> {
+    const page = await this.getPage(id);
+    await this.archiveViaGraphQL([id], false);
+    return { ...page, status: 'archived' };
+  }
+
+  async archivePageTree(id: string): Promise<void> {
+    await this.archiveViaGraphQL([id], true);
+  }
+
+  private async archiveViaGraphQL(pageIDs: string[], includeChildren: boolean): Promise<void> {
+    await this.requestCGraphQL(
+      'ArchivePagesMutation',
+      `mutation ArchivePagesMutation($pageIDs: [Long!]!, $includeChildren: [Boolean!]!) {
+        bulkArchivePages(pageIDs: $pageIDs, includeChildren: $includeChildren) {
+          taskId
+          status
+        }
+      }`,
+      { pageIDs, includeChildren: [includeChildren] },
+    );
+  }
+
+  async unarchivePage(id: string, parentId?: string): Promise<Page> {
+    // REST PUT with status=current returns 403 for archived pages — must use GraphQL
+    const variables: Record<string, unknown> = {
+      pageIDs: [id],
+      includeChildren: [false],
+    };
+    if (parentId) variables.parentPageId = parentId;
+    await this.requestCGraphQL(
+      'UnarchivePagesMutation',
+      `mutation UnarchivePagesMutation($pageIDs: [Long!]!, $includeChildren: [Boolean!]!, $parentPageId: Long) {
+        bulkUnarchivePages(pageIDs: $pageIDs, includeChildren: $includeChildren, parentPageId: $parentPageId) {
+          taskId
+          status
+        }
+      }`,
+      variables,
+    );
+    // Unarchive is async — poll until page status is 'current'
+    const maxAttempts = 10;
+    for (let i = 0; i < maxAttempts; i++) {
+      await sleep(500);
+      try {
+        const page = await this.getPage(id);
+        if (page.status === 'current') return page;
+      } catch {
+        // Page may not be visible yet during transition
+      }
+    }
+    // Best-effort: return whatever state we can get
+    return this.getPage(id);
   }
 }
 

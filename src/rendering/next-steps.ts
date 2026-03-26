@@ -8,6 +8,10 @@ export type OperationContext =
   | 'page_create'
   | 'page_update'
   | 'page_delete'
+  | 'page_move'
+  | 'page_copy'
+  | 'page_archive'
+  | 'page_unarchive'
   | 'space_list'
   | 'space_get'
   | 'search'
@@ -183,6 +187,58 @@ const HINTS: Record<OperationContext, NextStepHint[]> = {
       description: 'View all attachments',
       tool: 'manage_confluence_media',
       example: { operation: 'list', pageId: '$pageId' },
+    },
+  ],
+
+  page_move: [
+    {
+      description: 'View the moved page',
+      tool: 'manage_confluence_page',
+      example: { operation: 'get', pageId: '$pageId' },
+    },
+    {
+      description: 'See it in context',
+      tool: 'navigate_confluence',
+      example: { operation: 'tree', pageId: '$pageId', depth: 2 },
+    },
+  ],
+
+  page_copy: [
+    {
+      description: 'View the copy',
+      tool: 'manage_confluence_page',
+      example: { operation: 'get', pageId: '$pageId' },
+    },
+    {
+      description: 'Edit the copy',
+      tool: 'manage_confluence_page',
+      example: { operation: 'pull_for_editing', pageId: '$pageId' },
+    },
+  ],
+
+  page_archive: [
+    {
+      description: 'List archived pages in this space',
+      tool: 'manage_confluence_page',
+      example: { operation: 'list_archived', spaceKey: '$spaceKey' },
+    },
+    {
+      description: 'Restore this page',
+      tool: 'manage_confluence_page',
+      example: { operation: 'unarchive', pageId: '$pageId' },
+    },
+  ],
+
+  page_unarchive: [
+    {
+      description: 'View the restored page',
+      tool: 'manage_confluence_page',
+      example: { operation: 'get', pageId: '$pageId' },
+    },
+    {
+      description: 'Edit the restored page',
+      tool: 'manage_confluence_page',
+      example: { operation: 'pull_for_editing', pageId: '$pageId' },
     },
   ],
 };

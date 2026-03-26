@@ -6,6 +6,7 @@ deciders:
 related:
   - ADR-100
   - ADR-400
+  - ADR-201
 ---
 
 # ADR-200: Hybrid REST and GraphQL Client
