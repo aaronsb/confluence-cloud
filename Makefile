@@ -74,25 +74,20 @@ mcpb: build     ## Build .mcpb desktop extension bundle
 
 # ── Publishing ──────────────────────────────────────────────────────────
 
-publish-all: mcpb  ## Publish to MCP Registry, GitHub Release with MCPB (npm is CI-only)
+NOTES ?= Release v$(VERSION)
+
+publish-all: mcpb publish-registry publish-github  ## Publish to all channels (npm is CI-only)
 	@echo ""
-	@echo "Publishing v$(VERSION) to all channels."
-	@echo "  npm: handled by GitHub Actions on tag push"
-	@echo "  1. MCP Registry (requires GitHub auth)"
-	@echo "  2. GitHub Release + MCPB bundle"
-	@echo ""
-	@read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ] || (echo "Aborted." && exit 1)
-	@echo ""
+	@echo "v$(VERSION) published to all channels."
+
+publish-registry:  ## Publish to MCP Registry
 	@echo "── MCP Registry ──"
 	mcp-publisher login github
 	mcp-publisher publish server.json
-	@echo ""
+
+publish-github:  ## Create GitHub Release with MCPB bundle
 	@echo "── GitHub Release ──"
-	@read -p "Release notes (one line, or empty for default): " notes; \
-	if [ -z "$$notes" ]; then notes="Release v$(VERSION)"; fi; \
-	gh release create "v$(VERSION)" --title "v$(VERSION)" --notes "$$notes" confluence-cloud-mcp.mcpb
-	@echo ""
-	@echo "v$(VERSION) published to all channels."
+	gh release create "v$(VERSION)" --title "v$(VERSION)" --notes "$(NOTES)" confluence-cloud-mcp.mcpb
 
 # ── ADR ─────────────────────────────────────────────────────────────────
 
