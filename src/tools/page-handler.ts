@@ -3,6 +3,7 @@
  */
 
 import type { ConfluenceClient } from '../client/confluence-client.js';
+import { escapeCql } from '../client/cql-utils.js';
 import { parseAdf, type AdfNode } from '../content/adf-parser.js';
 import { renderBlocks, renderBlocksForScratchpad } from '../content/renderer.js';
 import { renderPage } from '../rendering/markdown-renderer.js';
@@ -372,7 +373,7 @@ async function handleListArchived(client: ConfluenceClient, args: PageArgs): Pro
     const space = await client.getSpace(args.spaceId);
     spaceKey = space.key;
   }
-  const cql = `type = page AND space = "${spaceKey}" ORDER BY lastmodified DESC`;
+  const cql = `type = page AND space = "${escapeCql(spaceKey!)}" ORDER BY lastmodified DESC`;
   const result = await client.searchByCql(cql, {
     limit: 50,
     cqlcontext: { contentStatuses: ['archived'] },

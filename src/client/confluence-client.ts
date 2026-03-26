@@ -63,7 +63,7 @@ export interface ConfluenceClient {
 
   // Archive
   archivePage(id: string): Promise<Page>;
-  archivePageTree(id: string): Promise<{ pagesArchived: number }>;
+  archivePageTree(id: string): Promise<void>;
   unarchivePage(id: string, parentId?: string): Promise<Page>;
 }
 
@@ -103,14 +103,14 @@ export class ConfluenceRestClient implements ConfluenceClient {
     query: string,
     variables: Record<string, unknown>,
   ): Promise<T> {
-    const raw = await this.fetchWithRetry<Array<{ data?: T; errors?: Array<{ message: string }> }>>(
+    const results = await this.fetchWithRetry<Array<{ data?: T; errors?: Array<{ message: string }> }>>(
       `${this.cgraphqlUrl}?q=${operationName}`,
       {
         method: 'POST',
         body: JSON.stringify([{ operationName, variables, query }]),
       },
     );
-    const result = (raw as Array<{ data?: T; errors?: Array<{ message: string }> }>)[0];
+    const result = results[0];
     if (result?.errors?.length) {
       throw new Error(`GraphQL ${operationName}: ${result.errors.map(e => e.message).join('; ')}`);
     }
@@ -480,9 +480,8 @@ export class ConfluenceRestClient implements ConfluenceClient {
     return { ...page, status: 'archived' };
   }
 
-  async archivePageTree(id: string): Promise<{ pagesArchived: number }> {
+  async archivePageTree(id: string): Promise<void> {
     await this.archiveViaGraphQL([id], true);
-    return { pagesArchived: -1 };
   }
 
   private async archiveViaGraphQL(pageIDs: string[], includeChildren: boolean): Promise<void> {
@@ -515,8 +514,18 @@ export class ConfluenceRestClient implements ConfluenceClient {
       }`,
       variables,
     );
-    // Unarchive is async — give it a moment, then fetch the page
-    await sleep(1000);
+    // Unarchive is async — poll until page status is 'current'
+    const maxAttempts = 10;
+    for (let i = 0; i < maxAttempts; i++) {
+      await sleep(500);
+      try {
+        const page = await this.getPage(id);
+        if (page.status === 'current') return page;
+      } catch {
+        // Page may not be visible yet during transition
+      }
+    }
+    // Best-effort: return whatever state we can get
     return this.getPage(id);
   }
 }
