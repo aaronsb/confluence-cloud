@@ -150,6 +150,8 @@ export function sanitizePath(filePath: string): string {
     .replace(/\\/g, '/')
     .split('/')
     .map(seg => sanitizeFilename(seg))
+    // Drop segments that sanitized to 'unnamed' (e.g. '..' → '' → 'unnamed').
+    // Only keep 'unnamed' if the entire input was empty (fallback sentinel).
     .filter(seg => seg !== 'unnamed' || filePath.trim() === '');
 
   if (segments.length === 0) return 'unnamed';

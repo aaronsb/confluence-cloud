@@ -77,24 +77,32 @@ async function handleList(): Promise<ToolResponse> {
   return { content: [{ type: 'text', text: lines.join('\n') }] };
 }
 
+const MAX_LIST_DEPTH = 10;
+
 async function listRecursive(rootDir: string, dir: string, lines: string[], depth: number): Promise<void> {
-  let entries: string[];
+  if (depth >= MAX_LIST_DEPTH) {
+    lines.push(`${'  '.repeat(depth + 1)}(truncated — max depth ${MAX_LIST_DEPTH})`);
+    return;
+  }
+
+  let entries: import('node:fs').Dirent[];
   try {
-    entries = await fs.readdir(dir);
+    entries = await fs.readdir(dir, { withFileTypes: true });
   } catch {
     return;
   }
 
   const indent = '  '.repeat(depth + 1);
-  for (const name of entries.sort()) {
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isSymbolicLink()) continue; // skip symlinks to prevent loops
     try {
-      const fullPath = path.join(dir, name);
-      const stat = await fs.stat(fullPath);
-      if (stat.isDirectory()) {
-        lines.push(`${indent}${name}/`);
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        lines.push(`${indent}${entry.name}/`);
         await listRecursive(rootDir, fullPath, lines, depth + 1);
-      } else if (stat.isFile()) {
-        lines.push(`${indent}${name}  (${formatSize(stat.size)}, ${stat.mtime.toISOString().slice(0, 16)})`);
+      } else if (entry.isFile()) {
+        const stat = await fs.stat(fullPath);
+        lines.push(`${indent}${entry.name}  (${formatSize(stat.size)}, ${stat.mtime.toISOString().slice(0, 16)})`);
       }
     } catch {
       // Skip entries we can't stat
