@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as path from 'node:path';
 import {
   sanitizeFilename,
+  sanitizePath,
   resolveWorkspacePath,
   validateWorkspaceDir,
   getWorkspaceDir,
@@ -49,6 +50,34 @@ describe('sanitizeFilename', () => {
   });
 });
 
+describe('sanitizePath', () => {
+  it('should preserve directory separators', () => {
+    expect(sanitizePath('projects/images/photo.png')).toBe(path.join('projects', 'images', 'photo.png'));
+  });
+
+  it('should sanitize each segment individually', () => {
+    expect(sanitizePath('my<project>/file?.txt')).toBe(path.join('my_project_', 'file_.txt'));
+  });
+
+  it('should handle backslash separators', () => {
+    expect(sanitizePath('projects\\docs\\readme.md')).toBe(path.join('projects', 'docs', 'readme.md'));
+  });
+
+  it('should strip traversal segments', () => {
+    // '..' sanitizes to 'unnamed' via sanitizeFilename (leading dots removed, empty → unnamed)
+    // then filtered out by the unnamed filter
+    expect(sanitizePath('projects/../../etc/passwd')).toBe(path.join('projects', 'etc', 'passwd'));
+  });
+
+  it('should return unnamed for empty input', () => {
+    expect(sanitizePath('')).toBe('unnamed');
+  });
+
+  it('should handle single filename (no separators)', () => {
+    expect(sanitizePath('photo.png')).toBe('photo.png');
+  });
+});
+
 describe('resolveWorkspacePath', () => {
   const originalEnv = process.env.WORKSPACE_DIR;
 
@@ -71,14 +100,25 @@ describe('resolveWorkspacePath', () => {
 
   it('should sanitize before resolving', () => {
     const result = resolveWorkspacePath('../../etc/passwd');
-    // After sanitization: _.._etc_passwd (dots preserved, separators replaced)
-    expect(result).toBe('/tmp/test-workspace/_.._etc_passwd');
+    // Traversal segments stripped, remaining path preserved inside workspace
+    expect(result).toBe('/tmp/test-workspace/etc/passwd');
+    expect(result.startsWith('/tmp/test-workspace/')).toBe(true);
   });
 
   it('should not resolve to workspace root itself', () => {
     // sanitizeFilename('') returns 'unnamed'
     const result = resolveWorkspacePath('');
     expect(result).toBe('/tmp/test-workspace/unnamed');
+  });
+
+  it('should resolve nested paths inside workspace', () => {
+    const result = resolveWorkspacePath('projects/images/photo.png');
+    expect(result).toBe('/tmp/test-workspace/projects/images/photo.png');
+  });
+
+  it('should prevent traversal in nested paths', () => {
+    const result = resolveWorkspacePath('projects/../../etc/passwd');
+    expect(result).toBe('/tmp/test-workspace/projects/etc/passwd');
   });
 });
 

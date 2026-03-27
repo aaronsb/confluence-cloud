@@ -9,8 +9,8 @@
  */
 
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 import * as os from 'node:os';
+import * as path from 'node:path';
 
 const APP_NAME = 'confluence-cloud-mcp';
 
@@ -119,7 +119,7 @@ export async function ensureWorkspaceDir(): Promise<WorkspaceStatus> {
 // ── Filename Sanitization ──────────────────────────────────
 
 /**
- * Sanitize a filename from external sources.
+ * Sanitize a single filename segment (no separators).
  * Strips null bytes, control characters, path separators, and dangerous chars.
  */
 export function sanitizeFilename(filename: string): string {
@@ -139,25 +139,57 @@ export function sanitizeFilename(filename: string): string {
     || 'unnamed';
 }
 
+/**
+ * Sanitize a workspace path that may contain directory separators.
+ * Each path segment is sanitized individually, preserving the directory structure.
+ * Empty segments and traversal attempts (e.g. '..') are removed.
+ */
+export function sanitizePath(filePath: string): string {
+  // Normalize separators to forward slash, split into segments
+  const segments = filePath
+    .replace(/\\/g, '/')
+    .split('/')
+    .map(seg => sanitizeFilename(seg))
+    // Drop segments that sanitized to 'unnamed' (e.g. '..' → '' → 'unnamed').
+    // Only keep 'unnamed' if the entire input was empty (fallback sentinel).
+    .filter(seg => seg !== 'unnamed' || filePath.trim() === '');
+
+  if (segments.length === 0) return 'unnamed';
+  return segments.join(path.sep);
+}
+
 // ── Path Resolution ────────────────────────────────────────
 
 /**
  * Resolve a file path within the workspace directory.
- * Prevents path traversal and sanitizes the filename.
+ * Supports nested paths (e.g. 'projects/report.csv').
+ * Prevents path traversal and sanitizes each path segment.
  */
-export function resolveWorkspacePath(filename: string): string {
+export function resolveWorkspacePath(filePath: string): string {
   const dir = getWorkspaceDir();
-  const sanitized = sanitizeFilename(filename);
+  // Use sanitizePath for nested paths, sanitizeFilename for flat filenames
+  const sanitized = filePath.includes('/') || filePath.includes('\\')
+    ? sanitizePath(filePath)
+    : sanitizeFilename(filePath);
   const resolved = path.resolve(dir, sanitized);
 
   const resolvedDir = path.resolve(dir);
   if (!resolved.startsWith(resolvedDir + path.sep) && resolved !== resolvedDir) {
     throw new Error(
-      `Path traversal detected: "${filename}" resolves outside workspace directory`,
+      `Path traversal detected: "${filePath}" resolves outside workspace directory`,
     );
   }
 
   return resolved;
+}
+
+/**
+ * Ensure parent directories exist for a workspace path.
+ * Call after resolveWorkspacePath to create intermediate dirs.
+ */
+export async function ensureParentDir(filePath: string): Promise<void> {
+  const dir = path.dirname(filePath);
+  await fs.mkdir(dir, { recursive: true, mode: 0o755 });
 }
 
 /**
