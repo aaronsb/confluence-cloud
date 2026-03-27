@@ -300,18 +300,22 @@ export const toolSchemas: Record<string, ToolSchema> = {
 
   manage_workspace: {
     name: 'manage_workspace',
-    description: 'Stage files in the local workspace for attachment operations. List, read, write, or delete files. Downloaded attachments land here; upload can read from here. Workspace files can be referenced in scratchpad content with :::media{file="name"}::: for atomic page-with-media publishing.',
+    description: 'Stage files in the local workspace for attachment operations. List, read, write, delete files, or create directories. Supports nested paths (e.g. "projects/images/photo.png"). Downloaded attachments land here; upload can read from here. All responses include the absolute filesystem path.',
     inputSchema: {
       type: 'object',
       properties: {
         operation: {
           type: 'string',
-          enum: ['list', 'read', 'write', 'delete'],
+          enum: ['list', 'read', 'write', 'delete', 'mkdir', 'move'],
           description: 'The workspace operation to perform',
         },
         filename: {
           type: 'string',
-          description: 'Filename (required for read, write, delete)',
+          description: 'File or directory path, supports nesting with / separators (required for read, write, delete, mkdir, move)',
+        },
+        destination: {
+          type: 'string',
+          description: 'Destination path for move operation — works like unix mv: rename a file (move filename:"old.txt" destination:"new.txt"), relocate it (move filename:"file.txt" destination:"subdir/file.txt"), or both at once',
         },
         content: {
           type: 'string',

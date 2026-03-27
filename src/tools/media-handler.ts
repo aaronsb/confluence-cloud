@@ -3,7 +3,6 @@
  */
 
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
 
 import type { ConfluenceClient } from '../client/confluence-client.js';
 import { renderAttachmentList } from '../rendering/markdown-renderer.js';
@@ -12,6 +11,7 @@ import type { ToolResponse } from '../types/index.js';
 import {
   ensureWorkspaceDir,
   resolveWorkspacePath,
+  ensureParentDir,
   verifyPathSafety,
   sanitizeFilename,
 } from '../workspace/index.js';
@@ -140,12 +140,13 @@ export async function handleMediaRequest(
       const dlFilename = args.filename || sanitizeFilename(dlInfo.title);
       const dlPath = resolveWorkspacePath(dlFilename);
       await verifyPathSafety(dlPath);
+      await ensureParentDir(dlPath);
       await fs.writeFile(dlPath, dlBytes);
 
       return {
         content: [{
           type: 'text',
-          text: `Downloaded: ${dlFilename} | ${dlInfo.mediaType} | ${dlBytes.length}B\nSaved to workspace. Use manage_workspace read or manage_confluence_media upload with workspaceFile:"${dlFilename}" to use it.`,
+          text: `Downloaded: ${dlFilename} | ${dlInfo.mediaType} | ${dlBytes.length}B\nPath: ${dlPath}\n\nUse manage_workspace read or manage_confluence_media upload with workspaceFile:"${dlFilename}" to use it.`,
         }],
       };
     }

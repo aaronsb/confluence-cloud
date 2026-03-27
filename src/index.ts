@@ -31,8 +31,8 @@ import { handlePageRequest } from './tools/page-handler.js';
 import { handleQueueRequest } from './tools/queue-handler.js';
 import { handleSearchRequest } from './tools/search-handler.js';
 import { handleSpaceRequest } from './tools/space-handler.js';
-import { handleWorkspaceRequest } from './tools/workspace-handler.js';
 import { toolSchemas } from './tools/tool-schemas.js';
+import { handleWorkspaceRequest } from './tools/workspace-handler.js';
 import type { ToolResponse } from './types/index.js';
 
 // ── Configuration ──────────────────────────────────────────────
