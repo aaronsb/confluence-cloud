@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -172,6 +172,30 @@ describe('handleEditRequest', () => {
     expect(result.content[0].text).toContain('Page updated successfully');
     expect(result.content[0].text).toContain('Version: 3');
     expect(scratchpads.get(id)).toBeNull();
+  });
+
+  // ── Submit: uses fresh version from getPage, not stale scratchpad version ──
+
+  it('should use re-fetched version, not stale scratchpad version', async () => {
+    const updateSpy = vi.fn(async () => fakePage({ version: { number: 6, createdAt: '', authorId: '' } }));
+    const freshClient = fakeClient({
+      getPage: async () => fakePage({ version: { number: 5, createdAt: '', authorId: '' } }),
+      updatePage: updateSpy,
+    });
+
+    const id = scratchpads.createFromLines(
+      { type: 'existing_page', pageId: '12345', version: 2, title: 'Stale Version' },
+      ['# Content'],
+    );
+
+    const result = await handleEditRequest(freshClient, scratchpads, {
+      operation: 'submit',
+      scratchpadId: id,
+    });
+
+    expect(result.isError).toBeUndefined();
+    // updatePage should receive version 5 (from getPage), not 2 (from scratchpad)
+    expect(updateSpy).toHaveBeenCalledWith('12345', 'Stale Version', expect.anything(), 5, undefined);
   });
 
   // ── Submit: empty buffer ──────────────────────────────
