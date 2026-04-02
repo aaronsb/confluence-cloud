@@ -250,7 +250,9 @@ async function handleSubmit(
       }
 
       const adf = serializeBlocks(blocks);
-      const page = await client.updatePage(pageId, sp.target.title, adf, sp.target.version, args.message);
+      // Re-fetch current version to avoid conflicts from metadata changes (e.g. title updates) between pull and submit
+      const current = await client.getPage(pageId);
+      const page = await client.updatePage(pageId, sp.target.title, adf, current.version.number, args.message);
       scratchpads.discard(args.scratchpadId!);
 
       const mediaNote = mediaFiles.length > 0 ? ` with ${mediaFiles.length} attachment(s)` : '';
