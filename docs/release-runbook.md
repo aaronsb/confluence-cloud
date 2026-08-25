@@ -133,7 +133,7 @@ For testing or manual distribution without CI:
 make mcpb              # the bundle — one, for every platform
 ```
 
-Requires `mcpb` CLI installed (`npm install -g @anthropic-ai/mcpb`).
+Requires `mcpb` CLI installed (`npm install -g @anthropic-ai/mcpb@^2` — the version release-mcpb.yml pins).
 
 ## Version Files
 
