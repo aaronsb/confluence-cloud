@@ -57,7 +57,7 @@ _release-commit:
 	git tag -a "v$(NEW_VERSION)" -m "v$(NEW_VERSION)"
 	git push && git push --tags
 	@echo ""
-	@echo "Released v$(NEW_VERSION). Run 'make publish-all' to publish."
+	@echo "Released v$(NEW_VERSION). CI publishes npm, the MCP Registry, and the GitHub Release with the .mcpb."
 
 # ── MCPB Bundle ─────────────────────────────────────────────────────────
 
@@ -76,9 +76,12 @@ mcpb: build     ## Build .mcpb desktop extension bundle
 
 NOTES ?= Release v$(VERSION)
 
-publish-all: mcpb publish-registry publish-github  ## Publish to all channels (npm is CI-only)
+# CI publishes every channel on tag push (see .github/workflows/npm-publish.yml and
+# release-mcpb.yml). These targets are the fallback for when CI cannot do it, and
+# running them after a green CI run would republish what CI already shipped.
+publish-all: mcpb publish-registry publish-github  ## Manual fallback: registry + GitHub Release (CI does all of this on tag push)
 	@echo ""
-	@echo "v$(VERSION) published to all channels."
+	@echo "v$(VERSION) published manually. Prefer letting CI do this on the next release."
 
 publish-registry:  ## Publish to MCP Registry
 	@echo "── MCP Registry ──"
