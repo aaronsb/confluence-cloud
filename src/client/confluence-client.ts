@@ -372,15 +372,17 @@ export class ConfluenceRestClient implements ConfluenceClient {
     await this.addLabels(pageId, [label]);
   }
 
+  // Label WRITES go through the v1 API: the v2 /pages/{id}/labels endpoint is
+  // read-only, and POST/DELETE against it return the 405 reported in #16.
   async addLabels(pageId: string, labels: string[]): Promise<void> {
-    await this.request(`/pages/${pageId}/labels`, {
+    await this.requestV1(`/content/${pageId}/label`, {
       method: 'POST',
       body: JSON.stringify(labels.map(name => ({ prefix: 'global', name }))),
     });
   }
 
   async removeLabel(pageId: string, label: string): Promise<void> {
-    await this.request(`/pages/${pageId}/labels/${encodeURIComponent(label)}`, { method: 'DELETE' });
+    await this.requestV1(`/content/${pageId}/label?name=${encodeURIComponent(label)}`, { method: 'DELETE' });
   }
 
   // ── Content Properties ──────────────────────────────────────
