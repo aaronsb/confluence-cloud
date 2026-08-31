@@ -17,12 +17,15 @@ rotate. The registry job `needs` the npm job, because `server.json` advertises t
 package at that version and publishing the registry entry first would point people at a
 tarball that does not exist yet.
 
-The workflow picks the npm dist-tag itself: a pre-release publishes under
-`alpha`/`beta`/`rc`, never `latest`, or every `npm install` and every `^x.y.z` range
-picks it up. It reads the marker out of the version string.
+The workflow picks the npm dist-tag itself: any semver pre-release (anything after
+`-` in the version) publishes under its pre-release identifier — `alpha`, `rc`,
+`next`, whatever the version says — never `latest`, or every `npm install` and every
+`^x.y.z` range picks it up.
 
 `make publish-all` still exists for publishing by hand if CI is unavailable. It is not
-the normal path — running it after a tag would republish what CI already shipped.
+the normal path, but it runs the same identity gate and the same idempotent registry
+publish as CI, so running it after a half-succeeded CI run finishes what is missing
+instead of double-publishing.
 
 ### Trusted publishing setup (one-time, before the first tagged release)
 
@@ -145,5 +148,7 @@ The version lives in three places, kept in sync by `make version-sync`:
 | `server.json` | `version` (twice — server entry AND `packages[0]`) | MCP server metadata / registry |
 | `mcpb/manifest.json` | `version` | .mcpb bundle metadata |
 
-Never edit these manually — use `npm version` + `make version-sync`. CI refuses to
-publish a registry entry whose `server.json` disagrees with the tag.
+Never edit these manually — use `npm version` + `make version-sync`. Every publish
+path gates on `scripts/check-publish-identity.cjs`, which refuses to publish unless
+the tag, `package.json`, `server.json`, and `mcpb/manifest.json` agree — and
+`server.json` names the npm package this repo actually publishes.

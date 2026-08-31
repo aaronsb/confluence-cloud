@@ -1,5 +1,5 @@
 .PHONY: build test lint fix clean check inspect mcpb help
-.PHONY: version-sync release-patch release-minor release-major publish-all
+.PHONY: version-sync release-patch release-minor release-major publish-all publish-check publish-registry publish-github
 
 VERSION = $(shell node -p 'require("./package.json").version')
 
@@ -78,19 +78,26 @@ NOTES ?= Release v$(VERSION)
 
 # CI publishes every channel on tag push (see .github/workflows/npm-publish.yml and
 # release-mcpb.yml). These targets are the fallback for when CI cannot do it, and
-# running them after a green CI run would republish what CI already shipped.
-publish-all: mcpb publish-registry publish-github  ## Manual fallback: registry + GitHub Release (CI does all of this on tag push)
+# they run the same identity gate and idempotent registry publish as CI — a
+# fallback runs precisely when something already went wrong, so a half-succeeded
+# CI run (registry published, upload failed) must not die on the duplicate
+# registry publish before reaching the upload.
+publish-all: publish-check mcpb publish-registry publish-github  ## Manual fallback: registry + GitHub Release (CI does all of this on tag push)
 	@echo ""
 	@echo "v$(VERSION) published manually. Prefer letting CI do this on the next release."
 
-publish-registry:  ## Publish to MCP Registry
+publish-check:  ## Assert tag/package.json/server.json/mcpb manifest agree
+	node scripts/check-publish-identity.cjs "v$(VERSION)"
+
+publish-registry:  ## Publish to MCP Registry (idempotent)
 	@echo "── MCP Registry ──"
 	mcp-publisher login github
-	mcp-publisher publish server.json
+	bash scripts/mcp-registry-publish.sh
 
-publish-github:  ## Create GitHub Release with MCPB bundle
+publish-github:  ## Create GitHub Release with MCPB bundle (idempotent)
 	@echo "── GitHub Release ──"
-	gh release create "v$(VERSION)" --title "v$(VERSION)" --notes "$(NOTES)" confluence-cloud-mcp.mcpb
+	gh release view "v$(VERSION)" >/dev/null 2>&1 || gh release create "v$(VERSION)" --title "v$(VERSION)" --notes "$(NOTES)"
+	gh release upload "v$(VERSION)" confluence-cloud-mcp.mcpb --clobber
 
 # ── ADR ─────────────────────────────────────────────────────────────────
 
