@@ -11,6 +11,7 @@ import type {
   SearchResult,
   Attachment,
   ContentProperty,
+  PageComment,
   PaginationOptions,
   PaginatedResponse,
 } from '../types/index.js';
@@ -56,6 +57,10 @@ export interface ConfluenceClient {
   getProperty(pageId: string, key: string): Promise<ContentProperty>;
   setProperty(pageId: string, key: string, value: Record<string, unknown>): Promise<ContentProperty>;
   deleteProperty(pageId: string, key: string): Promise<void>;
+
+  // Comments
+  getComments(pageId: string): Promise<PageComment[]>;
+  addComment(pageId: string, body: object, options?: { parentCommentId?: string; location?: 'footer' | 'inline' }): Promise<PageComment>;
 
   // Move / Copy
   movePage(id: string, parentId: string): Promise<Page>;
@@ -385,6 +390,42 @@ export class ConfluenceRestClient implements ConfluenceClient {
     await this.requestV1(`/content/${pageId}/label?name=${encodeURIComponent(label)}`, { method: 'DELETE' });
   }
 
+  // ── Comments ───────────────────────────────────────────────
+
+  // Comment READS use the v1 API: `depth=all` on /content/{id}/child/comment returns
+  // footer and inline comments, replies, authors and resolution in one response, where
+  // v2 needs a call per list, a call per thread for replies, and a user lookup for names.
+  async getComments(pageId: string): Promise<PageComment[]> {
+    const expand = 'body.atlas_doc_format,version,extensions.location,extensions.resolution,extensions.inlineProperties,ancestors';
+    const limit = 100;
+    const all: PageComment[] = [];
+    for (let start = 0; ; start += limit) {
+      const raw = await this.requestV1<ConfluenceV1PaginatedResponse<ConfluenceV1Comment>>(
+        `/content/${pageId}/child/comment?expand=${expand}&depth=all&limit=${limit}&start=${start}`,
+      );
+      all.push(...raw.results.map(r => mapV1Comment(r, pageId)));
+      if (raw.results.length < limit) break;
+    }
+    return all;
+  }
+
+  async addComment(
+    pageId: string,
+    body: object,
+    options?: { parentCommentId?: string; location?: 'footer' | 'inline' },
+  ): Promise<PageComment> {
+    const location = options?.location ?? 'footer';
+    const raw = await this.request<ConfluenceV2Comment>(`/${location}-comments`, {
+      method: 'POST',
+      body: JSON.stringify({
+        pageId,
+        ...(options?.parentCommentId ? { parentCommentId: options.parentCommentId } : {}),
+        body: { representation: 'atlas_doc_format', value: JSON.stringify(body) },
+      }),
+    });
+    return mapV2Comment(raw, location);
+  }
+
   // ── Content Properties ──────────────────────────────────────
 
   async getProperties(pageId: string): Promise<ContentProperty[]> {
@@ -583,6 +624,34 @@ interface ConfluenceV2ContentProperty {
   version?: { number: number; createdAt?: string };
 }
 
+interface ConfluenceV1Comment {
+  id: string;
+  body?: { atlas_doc_format?: { value: string } };
+  version?: { when?: string; by?: { displayName?: string; accountId?: string } };
+  ancestors?: Array<{ id: string }>;
+  extensions?: {
+    location?: 'footer' | 'inline';
+    resolution?: { status?: string };
+    inlineProperties?: { originalSelection?: string };
+  };
+}
+
+interface ConfluenceV1PaginatedResponse<T> {
+  results: T[];
+  start?: number;
+  limit?: number;
+  size?: number;
+}
+
+interface ConfluenceV2Comment {
+  id: string;
+  pageId?: string;
+  parentCommentId?: string;
+  body?: { atlas_doc_format?: { value: string } };
+  version?: { createdAt?: string; authorId?: string };
+  resolutionStatus?: string;
+}
+
 interface ConfluenceV2PaginatedResponse<T = ConfluenceV2Page> {
   results: T[];
   _links?: { next?: string };
@@ -677,6 +746,44 @@ function mapV1Content(raw: ConfluenceV1Content): Page {
     },
     createdAt: raw.version?.when ?? '',
     authorId: raw.version?.by?.accountId ?? raw.version?.by?.displayName ?? '',
+  };
+}
+
+function parseAdfValue(value: string | undefined): PageComment['body'] {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function mapV1Comment(raw: ConfluenceV1Comment, pageId: string): PageComment {
+  const ancestors = raw.ancestors ?? [];
+  const parent = ancestors[ancestors.length - 1]?.id;
+  return {
+    id: raw.id,
+    pageId,
+    location: raw.extensions?.location === 'inline' ? 'inline' : 'footer',
+    parentId: parent,
+    author: raw.version?.by?.displayName ?? raw.version?.by?.accountId ?? 'Unknown',
+    createdAt: raw.version?.when ?? '',
+    body: parseAdfValue(raw.body?.atlas_doc_format?.value),
+    resolutionStatus: raw.extensions?.resolution?.status as PageComment['resolutionStatus'],
+    inlineSelection: raw.extensions?.inlineProperties?.originalSelection,
+  };
+}
+
+function mapV2Comment(raw: ConfluenceV2Comment, location: 'footer' | 'inline'): PageComment {
+  return {
+    id: raw.id,
+    pageId: raw.pageId ?? '',
+    location,
+    parentId: raw.parentCommentId,
+    author: raw.version?.authorId ?? '',
+    createdAt: raw.version?.createdAt ?? '',
+    body: parseAdfValue(raw.body?.atlas_doc_format?.value),
+    resolutionStatus: raw.resolutionStatus as PageComment['resolutionStatus'],
   };
 }
 

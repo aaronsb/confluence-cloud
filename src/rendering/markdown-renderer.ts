@@ -4,7 +4,7 @@
  */
 
 import type { ToolSchema } from '../tools/tool-schemas.js';
-import type { Page, Space, SearchResult, Attachment } from '../types/index.js';
+import type { Page, Space, SearchResult, Attachment, PageComment } from '../types/index.js';
 
 // ── Tool Documentation ────────────────────────────────────────
 
@@ -101,6 +101,68 @@ export function renderSearchResults(results: SearchResult): string {
   }
 
   return lines.join('\n');
+}
+
+/** A comment with its ADF body already rendered to markdown by the content layer. */
+export type RenderedComment = PageComment & { text: string };
+
+export function renderComments(pageId: string, comments: RenderedComment[]): string {
+  if (comments.length === 0) {
+    return `No comments on page ${pageId}.`;
+  }
+
+  const footer = comments.filter(c => c.location === 'footer');
+  const inline = comments.filter(c => c.location === 'inline');
+  const resolved = inline.filter(c => c.resolutionStatus === 'resolved').length;
+  const lines: string[] = [];
+
+  const summary = [`${footer.length} footer`, `${inline.length} inline`];
+  if (resolved > 0) summary.push(`${resolved} resolved`);
+  lines.push(`Comments on page ${pageId}: ${summary.join(', ')}`);
+
+  if (footer.length > 0) {
+    lines.push('', '## Footer comments');
+    renderThread(lines, footer);
+  }
+  if (inline.length > 0) {
+    lines.push('', '## Inline comments');
+    renderThread(lines, inline);
+  }
+  return lines.join('\n');
+}
+
+/** Emit top-level comments in creation order, each followed by its replies, indented. */
+function renderThread(lines: string[], comments: RenderedComment[]): void {
+  const byId = new Set(comments.map(c => c.id));
+  const children = new Map<string, RenderedComment[]>();
+  const roots: RenderedComment[] = [];
+  for (const c of comments) {
+    if (c.parentId && byId.has(c.parentId)) {
+      const list = children.get(c.parentId) ?? [];
+      list.push(c);
+      children.set(c.parentId, list);
+    } else {
+      roots.push(c);
+    }
+  }
+  const byDate = (a: RenderedComment, b: RenderedComment) => a.createdAt.localeCompare(b.createdAt);
+  roots.sort(byDate);
+
+  const emit = (c: RenderedComment, label: string, depth: number) => {
+    const indent = '  '.repeat(depth);
+    const head = [`[${label}] ${c.author} (${formatDate(c.createdAt)})`, `id ${c.id}`];
+    if (c.resolutionStatus && c.resolutionStatus !== 'open') head.push(c.resolutionStatus);
+    lines.push('', `${indent}${head.join(' — ')}`);
+    if (c.inlineSelection && depth === 0) {
+      lines.push(`${indent}> ${c.inlineSelection}`);
+    }
+    for (const line of c.text.trim().split('\n')) {
+      lines.push(`${indent}${line}`);
+    }
+    const replies = (children.get(c.id) ?? []).sort(byDate);
+    replies.forEach((r, i) => emit(r, `${label}.${i + 1}`, depth + 1));
+  };
+  roots.forEach((c, i) => emit(c, String(i + 1), 0));
 }
 
 export function renderAttachmentList(attachments: Attachment[]): string {

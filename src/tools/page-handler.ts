@@ -6,7 +6,9 @@ import type { ConfluenceClient } from '../client/confluence-client.js';
 import { escapeCql } from '../client/cql-utils.js';
 import { parseAdf, type AdfNode } from '../content/adf-parser.js';
 import { renderBlocks, renderBlocksForScratchpad } from '../content/renderer.js';
-import { renderPage } from '../rendering/markdown-renderer.js';
+import { parseDirectives } from '../content/directive-parser.js';
+import { serializeBlocks } from '../content/adf-serializer.js';
+import { renderPage, renderComments, type RenderedComment } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
 import type { ScratchpadManager } from '../sessions/scratchpad.js';
 import type { ToolResponse } from '../types/index.js';
@@ -23,6 +25,8 @@ interface PageArgs {
   label?: string;
   propertyKey?: string;
   propertyValue?: Record<string, unknown>;
+  body?: string;
+  parentCommentId?: string;
 }
 
 export async function handlePageRequest(
@@ -55,6 +59,10 @@ export async function handlePageRequest(
       return handleListArchived(client, args);
     case 'get_versions':
       return handleGetVersions(client, args);
+    case 'get_comments':
+      return handleGetComments(client, args);
+    case 'add_comment':
+      return handleAddComment(client, args);
     case 'get_labels':
       return handleGetLabels(client, args);
     case 'add_labels':
@@ -199,6 +207,54 @@ async function handleGetVersions(client: ConfluenceClient, args: PageArgs): Prom
 }
 
 // ── Labels ──────────────────────────────────────────────────
+
+async function handleGetComments(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for get_comments' }], isError: true };
+  }
+  const comments = await client.getComments(args.pageId);
+  const rendered: RenderedComment[] = comments.map(c => ({
+    ...c,
+    text: c.body ? renderBlocks(parseAdf(c.body as AdfNode)) : '',
+  }));
+  const text = renderComments(args.pageId, rendered) + getNextSteps('page_comments', { pageId: args.pageId });
+  return { content: [{ type: 'text', text }] };
+}
+
+async function handleAddComment(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
+  if (!args.pageId) {
+    return { content: [{ type: 'text', text: 'pageId is required for add_comment' }], isError: true };
+  }
+  if (!args.body || args.body.trim() === '') {
+    return { content: [{ type: 'text', text: 'body is required for add_comment' }], isError: true };
+  }
+
+  // A reply goes to the endpoint matching its parent's location, so look the parent up first.
+  let location: 'footer' | 'inline' = 'footer';
+  if (args.parentCommentId) {
+    const parent = (await client.getComments(args.pageId)).find(c => c.id === args.parentCommentId);
+    if (!parent) {
+      return {
+        content: [{ type: 'text', text: `Comment ${args.parentCommentId} not found on page ${args.pageId}.` }],
+        isError: true,
+      };
+    }
+    location = parent.location;
+  }
+
+  const blocks = parseDirectives(args.body);
+  if (blocks.length === 0) {
+    return { content: [{ type: 'text', text: 'body produced no content.' }], isError: true };
+  }
+  const comment = await client.addComment(args.pageId, serializeBlocks(blocks), {
+    parentCommentId: args.parentCommentId,
+    location,
+  });
+
+  const what = args.parentCommentId ? `Reply to ${args.parentCommentId} added` : 'Comment added';
+  const text = `${what}: id ${comment.id} on page ${args.pageId}.` + getNextSteps('comment_add', { pageId: args.pageId });
+  return { content: [{ type: 'text', text }] };
+}
 
 async function handleGetLabels(client: ConfluenceClient, args: PageArgs): Promise<ToolResponse> {
   if (!args.pageId) {
