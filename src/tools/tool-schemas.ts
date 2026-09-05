@@ -12,18 +12,18 @@ export interface ToolSchema {
 export const toolSchemas: Record<string, ToolSchema> = {
   manage_confluence_page: {
     name: 'manage_confluence_page',
-    description: 'Get, create, update, delete, move, copy, archive, or pull pages for editing. Manage labels and content properties. Create returns a scratchpad for composing content before publishing. Use pull_for_editing to load existing page content into a scratchpad. Archive/unarchive pages or entire page trees.',
+    description: 'Get, create, update, delete, move, copy, archive, or pull pages for editing. Read and add comments. Manage labels and content properties. Create returns a scratchpad for composing content before publishing. Use pull_for_editing to load existing page content into a scratchpad. Archive/unarchive pages or entire page trees.',
     inputSchema: {
       type: 'object',
       properties: {
         operation: {
           type: 'string',
-          enum: ['get', 'create', 'update', 'delete', 'move', 'copy', 'get_versions', 'pull_for_editing', 'get_labels', 'add_labels', 'remove_label', 'get_properties', 'get_property', 'set_property', 'delete_property', 'archive', 'archive_tree', 'unarchive', 'list_archived'],
+          enum: ['get', 'create', 'update', 'delete', 'move', 'copy', 'get_versions', 'pull_for_editing', 'get_comments', 'add_comment', 'get_labels', 'add_labels', 'remove_label', 'get_properties', 'get_property', 'set_property', 'delete_property', 'archive', 'archive_tree', 'unarchive', 'list_archived'],
           description: 'The operation to perform',
         },
         pageId: {
           type: 'string',
-          description: 'Page ID (required for get, update, delete, move, copy, get_versions, pull_for_editing, archive, archive_tree, unarchive)',
+          description: 'Page ID (required for get, update, delete, move, copy, get_versions, pull_for_editing, get_comments, add_comment, archive, archive_tree, unarchive)',
         },
         spaceId: {
           type: 'string',
@@ -62,6 +62,14 @@ export const toolSchemas: Record<string, ToolSchema> = {
         propertyValue: {
           type: 'object',
           description: 'Content property value as JSON object (for set_property)',
+        },
+        body: {
+          type: 'string',
+          description: 'Comment text as markdown (for add_comment). Rendered through the same directive parser as page content.',
+        },
+        parentCommentId: {
+          type: 'string',
+          description: 'Comment ID to reply to (optional for add_comment). Ids come from get_comments; replies to inline comments land on that inline thread.',
         },
       },
       required: ['operation'],

@@ -55,6 +55,21 @@ export interface AdfDocument {
   [key: string]: unknown;
 }
 
+/** A footer or inline comment on a page, threaded through parentId. */
+export interface PageComment {
+  id: string;
+  pageId: string;
+  location: 'footer' | 'inline';
+  /** Set on replies; the id of the comment being answered. */
+  parentId?: string;
+  author: string;
+  createdAt: string;
+  body?: AdfDocument;
+  resolutionStatus?: 'open' | 'resolved' | 'reopened' | 'dangling';
+  /** Inline comments only: the page text the comment was anchored to. */
+  inlineSelection?: string;
+}
+
 export interface Space {
   id: string;
   key: string;

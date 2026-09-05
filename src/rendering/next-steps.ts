@@ -12,6 +12,8 @@ export type OperationContext =
   | 'page_copy'
   | 'page_archive'
   | 'page_unarchive'
+  | 'page_comments'
+  | 'comment_add'
   | 'space_list'
   | 'space_get'
   | 'search'
@@ -64,6 +66,11 @@ const HINTS: Record<OperationContext, NextStepHint[]> = {
       example: { operation: 'pull_for_editing', pageId: '$pageId' },
     },
     {
+      description: 'Read comments',
+      tool: 'manage_confluence_page',
+      example: { operation: 'get_comments', pageId: '$pageId' },
+    },
+    {
       description: 'View child pages',
       tool: 'navigate_confluence',
       example: { operation: 'children', pageId: '$pageId' },
@@ -72,6 +79,32 @@ const HINTS: Record<OperationContext, NextStepHint[]> = {
       description: 'Find pages linking here',
       tool: 'navigate_confluence',
       example: { operation: 'backlinks', pageId: '$pageId' },
+    },
+  ],
+
+  page_comments: [
+    {
+      description: 'Add a comment',
+      tool: 'manage_confluence_page',
+      example: { operation: 'add_comment', pageId: '$pageId', body: '...' },
+    },
+    {
+      description: 'Reply to a comment',
+      tool: 'manage_confluence_page',
+      example: { operation: 'add_comment', pageId: '$pageId', parentCommentId: '<id>', body: '...' },
+    },
+    {
+      description: 'View the page',
+      tool: 'manage_confluence_page',
+      example: { operation: 'get', pageId: '$pageId', expand: ['body'] },
+    },
+  ],
+
+  comment_add: [
+    {
+      description: 'Read the thread',
+      tool: 'manage_confluence_page',
+      example: { operation: 'get_comments', pageId: '$pageId' },
     },
   ],
 
