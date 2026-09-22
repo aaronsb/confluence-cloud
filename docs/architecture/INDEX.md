@@ -29,6 +29,7 @@ _API transport (REST v2, GraphQL), auth, multi-tenancy_
 | ADR | Title | Status |
 |-----|-------|--------|
 | [ADR-200](./client/ADR-200-hybrid-rest-and-graphql-client.md) | Hybrid REST and GraphQL Client | Draft |
+| [ADR-201](./client/ADR-201-graphql-first-client-strategy.md) | GraphQL-First Client Strategy | Draft |
 
 ## Content
 _ADF handling, macro blocks, editing sessions, round-trip fidelity_
@@ -55,5 +56,5 @@ _Batching, queuing, field discovery, rendering facades_
 |-----|-------|--------|
 | [ADR-500](./operations/ADR-500-rendering-facades-and-semantic-hinting.md) | Rendering Facades and Semantic Hinting | Draft |
 | [ADR-501](./operations/ADR-501-page-metadata-labels-and-content-properties.md) | Page Metadata — Labels and Content Properties | Draft |
-| [ADR-502](./operations/ADR-502-workspace-directory-xdg-file-staging-for-attachments.md) | Workspace Directory — XDG File Staging for Attachments | Draft |
-| [ADR-503](./operations/ADR-503-page-comments-footer-and-inline.md) | Page Comments — Footer and Inline | Draft |
+| [ADR-502](./operations/ADR-502-workspace-directory-xdg-file-staging-for-attachments.md) | Workspace Directory — XDG File Staging for Attachments | Accepted |
+| [ADR-503](./operations/ADR-503-page-comments-footer-and-inline.md) | Page Comments — Footer and Inline | Accepted |
