@@ -49,3 +49,79 @@ describe('ConfluenceRestClient labels', () => {
     expect(options.method).toBe('DELETE');
   });
 });
+
+// #19: CQL failures must surface a CQL diagnostic, not a JS TypeError.
+describe('ConfluenceRestClient searchByCql errors', () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const client = new ConfluenceRestClient({
+    host: 'https://example.atlassian.net',
+    email: 'user@example.com',
+    apiToken: 'token',
+  });
+
+  it('surfaces the message from a 400 error body, stripped of the Java exception prefix', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      message: 'com.atlassian.confluence.api.service.exceptions.api.BadRequestException: Unsupported value for type, got : bogus, expected one of : [space, user, page, blogpost, comment, attachment, database, whiteboard, slide, embed, folder]',
+      statusCode: 400,
+    }), { status: 400 }));
+    await expect(client.searchByCql('type = bogus')).rejects.toThrow(
+      'Invalid CQL: Unsupported value for type, got : bogus, expected one of : ' +
+      '[space, user, page, blogpost, comment, attachment, database, whiteboard, slide, embed, folder]. CQL: type = bogus',
+    );
+  });
+
+  it('keeps a non-JSON 400 body verbatim', async () => {
+    fetchMock.mockResolvedValue(new Response('bad query', { status: 400 }));
+    await expect(client.searchByCql('type = bogus')).rejects.toThrow('Invalid CQL: bad query');
+  });
+
+  it('passes non-400 errors through unchanged', async () => {
+    fetchMock.mockResolvedValue(new Response('{"message":"nope"}', { status: 403 }));
+    await expect(client.searchByCql('type = page')).rejects.toThrow('Confluence API error 403');
+  });
+
+  it('explains non-content-only results instead of dereferencing undefined, without naming a tool', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      results: [{ space: { key: 'ABC' }, entityType: 'space', title: 'ABC' }],
+      totalSize: 1,
+    }), { status: 200 }));
+    await expect(client.searchByCql('type = space AND space.type = "personal"')).rejects.toThrow(
+      'CQL matched only space results; no content in this result set. CQL: type = space AND space.type = "personal"',
+    );
+  });
+
+  it('returns a non-content-only page with its cursor instead of throwing, when more pages remain', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      results: [{ space: { key: 'ABC' }, entityType: 'space' }],
+      totalSize: 40,
+      _links: { next: '/rest/api/search?cql=type%20%3D%20space&cursor=next-page' },
+    }), { status: 200 }));
+    const result = await client.searchByCql('type = space');
+    expect(result.results).toEqual([]);
+    expect(result.omittedNonContent).toBe(1);
+    expect(result.cursor).toBe('next-page');
+  });
+
+  it('drops non-content hits mixed in with content hits and counts them as omitted', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      results: [
+        { space: { key: 'ABC' }, entityType: 'space' },
+        { content: { id: '42', title: 'Page', type: 'page', status: 'current' }, entityType: 'content' },
+      ],
+      totalSize: 2,
+    }), { status: 200 }));
+    const result = await client.searchByCql('text ~ "abc"');
+    expect(result.results.map(r => r.content.id)).toEqual(['42']);
+    expect(result.omittedNonContent).toBe(1);
+  });
+});

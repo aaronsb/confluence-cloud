@@ -94,4 +94,25 @@ describe('handleSearchRequest', () => {
     await handleSearchRequest(client, { operation: 'recent', cursor: 'xyz', limit: 10 });
     expect(client.searchByCql).toHaveBeenCalledWith(expect.any(String), { cursor: 'xyz', limit: 10 });
   });
+
+  it('should add search_confluence-specific guidance to a neutral non-content-only error', async () => {
+    const client = {
+      searchByCql: vi.fn().mockRejectedValue(
+        new Error('CQL matched only space results; no content in this result set. CQL: type = space'),
+      ),
+    } as unknown as ConfluenceClient;
+    const result = await handleSearchRequest(client, { operation: 'cql', cql: 'type = space' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('no content in this result set');
+    expect(result.content[0].text).toContain('Use manage_confluence_space for spaces');
+  });
+
+  it('should let unrelated errors propagate unchanged', async () => {
+    const client = {
+      searchByCql: vi.fn().mockRejectedValue(new Error('Invalid CQL: bad token. CQL: type = bogus')),
+    } as unknown as ConfluenceClient;
+    await expect(handleSearchRequest(client, { operation: 'cql', cql: 'type = bogus' })).rejects.toThrow(
+      'Invalid CQL: bad token',
+    );
+  });
 });

@@ -6,7 +6,7 @@ import type { ConfluenceClient } from '../client/confluence-client.js';
 import { escapeCql } from '../client/cql-utils.js';
 import { renderSearchResults } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
-import type { ToolResponse } from '../types/index.js';
+import type { SearchResult, ToolResponse } from '../types/index.js';
 
 interface SearchArgs {
   operation: string;
@@ -66,7 +66,24 @@ export async function handleSearchRequest(
       return { content: [{ type: 'text', text: `Unknown search operation: ${args.operation}` }], isError: true };
   }
 
-  const results = await client.searchByCql(cql, { cursor: args.cursor, limit: args.limit ?? 25 });
+  let results: SearchResult;
+  try {
+    results = await client.searchByCql(cql, { cursor: args.cursor, limit: args.limit ?? 25 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // The client stays policy-free and reports only what CQL matched; the
+    // guidance toward manage_confluence_space is search_confluence's own.
+    if (/^CQL matched only .* results; no content in this result set\./.test(message)) {
+      return {
+        content: [{
+          type: 'text',
+          text: `${message} search_confluence returns content only (type = page, blogpost, comment, attachment). Use manage_confluence_space for spaces.`,
+        }],
+        isError: true,
+      };
+    }
+    throw error;
+  }
   let text = renderSearchResults(results);
   text += getNextSteps('search', { cql });
   return { content: [{ type: 'text', text }] };

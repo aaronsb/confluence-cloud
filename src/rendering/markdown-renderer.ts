@@ -86,6 +86,9 @@ export function renderSearchResults(results: SearchResult): string {
   const lines: string[] = [];
 
   lines.push(`Found ${results.totalSize} result(s)`);
+  if (results.omittedNonContent) {
+    lines.push(`Showing ${results.results.length} content items (${results.omittedNonContent} space/user hits omitted)`);
+  }
   lines.push('');
 
   for (const item of results.results) {

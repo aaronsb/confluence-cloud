@@ -101,6 +101,8 @@ export interface SearchResult {
   results: SearchResultItem[];
   totalSize: number;
   cursor?: string;
+  /** Non-content hits (spaces, users, ...) dropped from this page, if any. */
+  omittedNonContent?: number;
 }
 
 export interface SearchResultItem {
