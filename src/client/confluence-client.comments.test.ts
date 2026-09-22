@@ -178,6 +178,64 @@ describe('ConfluenceRestClient comments', () => {
     errSpy.mockRestore();
   });
 
+  it('walks replies nested 3 levels deep (root, reply, reply-of-reply)', async () => {
+    route({
+      '/pages/123/footer-comments': { results: [{ id: '1', version: ver('a1', '') }] },
+      '/footer-comments/1/children': { results: [{ id: '2', parentCommentId: '1', version: ver('b1', '') }] },
+      '/footer-comments/2/children': { results: [{ id: '3', parentCommentId: '2', version: ver('c1', '') }] },
+      '/footer-comments/3/children': { results: [] },
+    });
+    const comments = await client.getComments('123');
+    expect(comments.map(c => c.id).sort()).toEqual(['1', '2', '3']);
+    const byId = Object.fromEntries(comments.map(c => [c.id, c]));
+    expect(byId['3']).toMatchObject({ parentId: '2', location: 'footer' });
+  });
+
+  it('drops a comment id already seen instead of requeuing it', async () => {
+    // '2' is returned both as a top-level comment and as a `children` result of '1',
+    // which would loop forever if `seen` didn't filter it back out of the frontier.
+    route({
+      '/pages/123/footer-comments': { results: [
+        { id: '1', version: ver('a1', '') },
+        { id: '2', version: ver('b1', '') },
+      ] },
+      '/footer-comments/1/children': { results: [{ id: '2', parentCommentId: '1', version: ver('b1', '') }] },
+    });
+    const comments = await client.getComments('123');
+    expect(comments.filter(c => c.id === '2')).toHaveLength(1);
+    // The requeued '2' is never probed for children a second time.
+    expect(fetchMock.mock.calls.filter(([u]) => (u as string).includes('/footer-comments/2/children'))).toHaveLength(1);
+  });
+
+  it('falls back to the last editor when versions/1 fails for an edited comment', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url).pathname.replace('/wiki/api/v2', '');
+      if (path.endsWith('/pages/123/footer-comments')) {
+        return json({ results: [{ id: '1', version: ver('ed1', '2026-07-08T14:27:06.132Z', 3) }] });
+      }
+      // Non-retryable status, so the failure surfaces on the first attempt.
+      if (path.endsWith('/footer-comments/1/versions/1')) return new Response('not found', { status: 404 });
+      return json({ results: [] });
+    });
+
+    const [c] = await client.getComments('123');
+    expect(c).toMatchObject({ id: '1', author: 'ed1', createdAt: '2026-07-08T14:27:06.132Z' });
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('versions/1 failed for comment 1'));
+    errSpy.mockRestore();
+  });
+
+  it('rejects the read, naming the comment, when a children call fails', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('/pages/123/footer-comments')) return json({ results: [{ id: '1', version: ver('a1', '') }] });
+      // Non-retryable status, so the failure surfaces on the first attempt.
+      if (path.endsWith('/footer-comments/1/children')) return new Response('bad request', { status: 400 });
+      return json({ results: [] });
+    });
+    await expect(client.getComments('123')).rejects.toThrow('Failed to fetch children of comment 1');
+  });
+
   it('posts a footer comment through v2 with the ADF body as a JSON string', async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ id: '9', pageId: '123' }), { status: 200 }));
     const created = await client.addComment('123', adf);
@@ -197,5 +255,40 @@ describe('ConfluenceRestClient comments', () => {
     const [url, options] = fetchMock.mock.calls[0];
     expect(url).toBe('https://example.atlassian.net/wiki/api/v2/inline-comments');
     expect(JSON.parse(options.body).parentCommentId).toBe('3');
+  });
+
+  describe('getCommentLocation', () => {
+    it('returns a footer hit on the first call, without trying inline', async () => {
+      fetchMock.mockResolvedValue(new Response(JSON.stringify({ id: '1', pageId: '123' }), { status: 200 }));
+      const result = await client.getCommentLocation('1');
+      expect(result).toEqual({ location: 'footer', pageId: '123' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe('https://example.atlassian.net/wiki/api/v2/footer-comments/1');
+    });
+
+    it('falls back to inline only after a 404 on footer', async () => {
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.includes('/footer-comments/3')) return new Response('not found', { status: 404 });
+        if (url.includes('/inline-comments/3')) return json({ id: '3', pageId: '123' });
+        throw new Error(`unexpected url ${url}`);
+      });
+      const result = await client.getCommentLocation('3');
+      expect(result).toEqual({ location: 'inline', pageId: '123' });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('propagates a non-404 error without trying inline', async () => {
+      // Non-retryable status, so the failure surfaces on the first attempt.
+      fetchMock.mockResolvedValue(new Response('forbidden', { status: 403 }));
+      await expect(client.getCommentLocation('1')).rejects.toThrow('Confluence API error 403');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns undefined when both footer and inline 404', async () => {
+      fetchMock.mockImplementation(async () => new Response('not found', { status: 404 }));
+      const result = await client.getCommentLocation('999');
+      expect(result).toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
   });
 });

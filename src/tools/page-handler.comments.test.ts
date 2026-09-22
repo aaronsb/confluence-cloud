@@ -15,6 +15,10 @@ const comments: PageComment[] = [
 function stubClient(overrides: Partial<ConfluenceClient> = {}): ConfluenceClient {
   return {
     getComments: vi.fn().mockResolvedValue(comments),
+    getCommentLocation: vi.fn().mockImplementation(async (id: string) => {
+      const found = comments.find(c => c.id === id);
+      return found ? { location: found.location, pageId: found.pageId } : undefined;
+    }),
     addComment: vi.fn().mockResolvedValue({ id: '9', pageId: '123', location: 'footer', author: '', createdAt: '' }),
     ...overrides,
   } as unknown as ConfluenceClient;
@@ -54,10 +58,12 @@ describe('manage_confluence_page comments', () => {
     expect(res.content[0].text).toContain('Comment added: id 9');
   });
 
-  it('routes a reply to the parent comment location', async () => {
+  it('routes a reply to the parent comment location without reading the full comment tree', async () => {
     const client = stubClient();
     const res = await handlePageRequest(client, scratchpads, { operation: 'add_comment', pageId: '123', body: 'Fixed', parentCommentId: '3' });
     expect(res.isError).toBeUndefined();
+    expect(client.getCommentLocation).toHaveBeenCalledWith('3');
+    expect(client.getComments).not.toHaveBeenCalled();
     const [, , opts] = (client.addComment as any).mock.calls[0];
     expect(opts).toEqual({ parentCommentId: '3', location: 'inline' });
     expect(res.content[0].text).toContain('Reply to 3 added');
@@ -70,5 +76,15 @@ describe('manage_confluence_page comments', () => {
     expect(client.addComment).not.toHaveBeenCalled();
     const empty = await handlePageRequest(client, scratchpads, { operation: 'add_comment', pageId: '123', body: '  ' });
     expect(empty.isError).toBe(true);
+  });
+
+  it('rejects a reply whose parent lives on a different page', async () => {
+    const client = stubClient({
+      getCommentLocation: vi.fn().mockResolvedValue({ location: 'footer', pageId: '999' }),
+    });
+    const res = await handlePageRequest(client, scratchpads, { operation: 'add_comment', pageId: '123', body: 'x', parentCommentId: '5' });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain('Comment 5 not found on page 123.');
+    expect(client.addComment).not.toHaveBeenCalled();
   });
 });

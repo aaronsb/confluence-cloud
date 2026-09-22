@@ -65,6 +65,7 @@ export interface ConfluenceClient {
 
   // Comments
   getComments(pageId: string): Promise<PageComment[]>;
+  getCommentLocation(commentId: string): Promise<{ location: 'footer' | 'inline'; pageId?: string } | undefined>;
   addComment(pageId: string, body: object, options?: { parentCommentId?: string; location?: 'footer' | 'inline' }): Promise<PageComment>;
 
   // Move / Copy
@@ -435,14 +436,21 @@ export class ConfluenceRestClient implements ConfluenceClient {
       raws.push(...top.map(raw => ({ raw, location })));
     }
 
-    // Walk reply threads breadth-first; replies inherit their root's location.
+    // Walk reply threads breadth-first; replies inherit their root's location. A failed
+    // `children` call is fatal, because a silently dropped thread misrepresents the
+    // discussion; the error names the comment whose `children` call failed.
     const seen = new Set(raws.map(r => r.raw.id));
     let frontier = raws;
     while (frontier.length > 0) {
       const batches = await mapWithConcurrency(frontier, COMMENT_FANOUT, ({ raw, location }) =>
         this.listAllV2<ConfluenceV2Comment>(
           `/${location}-comments/${raw.id}/children`, { 'body-format': 'atlas_doc_format' },
-        ).then(children => children.map(child => ({ raw: child, location }))),
+        ).then(
+          children => children.map(child => ({ raw: child, location })),
+          error => {
+            throw new Error(`Failed to fetch children of comment ${raw.id}: ${error instanceof Error ? error.message : error}`);
+          },
+        ),
       );
       frontier = batches.flat().filter(c => !seen.has(c.raw.id));
       for (const c of frontier) seen.add(c.raw.id);
@@ -450,11 +458,17 @@ export class ConfluenceRestClient implements ConfluenceClient {
     }
 
     // `version` on a comment is its latest edit. For edited comments, fetch version 1
-    // so the author and date are the original poster's, not the last editor's.
+    // so the author and date are the original poster's, not the last editor's. A failed
+    // lookup falls back to the last editor's author and date, same as a `users-bulk`
+    // failure falls back to account ids: the main content is already in hand.
     const originals = new Map<string, ConfluenceV2Version>();
     const edited = raws.filter(r => (r.raw.version?.number ?? 1) > 1);
     await mapWithConcurrency(edited, COMMENT_FANOUT, async ({ raw, location }) => {
-      originals.set(raw.id, await this.request<ConfluenceV2Version>(`/${location}-comments/${raw.id}/versions/1`));
+      try {
+        originals.set(raw.id, await this.request<ConfluenceV2Version>(`/${location}-comments/${raw.id}/versions/1`));
+      } catch (error) {
+        console.error(`[confluence-cloud] versions/1 failed for comment ${raw.id}; showing last editor. ${error instanceof Error ? error.message : error}`);
+      }
     });
 
     const comments = raws.map(({ raw, location }) => {
@@ -471,6 +485,24 @@ export class ConfluenceRestClient implements ConfluenceClient {
     const names = await this.resolveDisplayNames(comments.map(c => c.author));
     for (const c of comments) c.author = names.get(c.author) ?? (c.author || 'Unknown');
     return comments;
+  }
+
+  /**
+   * Look up a single comment's location and page without reading the whole comment
+   * tree. Tries `footer-comments/{id}` first; only on a 404 does it try
+   * `inline-comments/{id}`, since a footer comment 404s there. Any other error
+   * propagates. Returns `undefined` if the id is neither.
+   */
+  async getCommentLocation(commentId: string): Promise<{ location: CommentLocation; pageId?: string } | undefined> {
+    for (const location of ['footer', 'inline'] as const) {
+      try {
+        const raw = await this.request<ConfluenceV2Comment>(`/${location}-comments/${commentId}`);
+        return { location, pageId: raw.pageId };
+      } catch (error) {
+        if (!(error instanceof Error && error.message.includes('error 404'))) throw error;
+      }
+    }
+    return undefined;
   }
 
   /** Follow a v2 list endpoint's `_links.next` cursor until exhausted. */

@@ -232,8 +232,8 @@ async function handleAddComment(client: ConfluenceClient, args: PageArgs): Promi
   // A reply goes to the endpoint matching its parent's location, so look the parent up first.
   let location: 'footer' | 'inline' = 'footer';
   if (args.parentCommentId) {
-    const parent = (await client.getComments(args.pageId)).find(c => c.id === args.parentCommentId);
-    if (!parent) {
+    const parent = await client.getCommentLocation(args.parentCommentId);
+    if (!parent || (parent.pageId && parent.pageId !== args.pageId)) {
       return {
         content: [{ type: 'text', text: `Comment ${args.parentCommentId} not found on page ${args.pageId}.` }],
         isError: true,
