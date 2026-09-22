@@ -396,15 +396,21 @@ export class ConfluenceRestClient implements ConfluenceClient {
   // footer and inline comments, replies, authors and resolution in one response, where
   // v2 needs a call per list, a call per thread for replies, and a user lookup for names.
   async getComments(pageId: string): Promise<PageComment[]> {
-    const expand = 'body.atlas_doc_format,version,extensions.location,extensions.resolution,extensions.inlineProperties,ancestors';
+    const expand = 'body.atlas_doc_format,version,history,extensions.location,extensions.resolution,extensions.inlineProperties,ancestors';
     const limit = 100;
     const all: PageComment[] = [];
-    for (let start = 0; ; start += limit) {
+    for (let start = 0; ; ) {
       const raw = await this.requestV1<ConfluenceV1PaginatedResponse<ConfluenceV1Comment>>(
         `/content/${pageId}/child/comment?expand=${expand}&depth=all&limit=${limit}&start=${start}`,
       );
+      // Confluence v1 can silently cap the page size below the requested `limit`
+      // (the real cap comes back in `raw.limit`), so keep paging off `_links.next`
+      // rather than comparing result count to the limit we asked for. An empty
+      // page guards against looping forever if `next` is ever set without results.
+      if (raw.results.length === 0) break;
       all.push(...raw.results.map(r => mapV1Comment(r, pageId)));
-      if (raw.results.length < limit) break;
+      if (!raw._links?.next) break;
+      start += raw.results.length;
     }
     return all;
   }
@@ -628,6 +634,7 @@ interface ConfluenceV1Comment {
   id: string;
   body?: { atlas_doc_format?: { value: string } };
   version?: { when?: string; by?: { displayName?: string; accountId?: string } };
+  history?: { createdDate?: string; createdBy?: { displayName?: string; accountId?: string } };
   ancestors?: Array<{ id: string }>;
   extensions?: {
     location?: 'footer' | 'inline';
@@ -641,6 +648,7 @@ interface ConfluenceV1PaginatedResponse<T> {
   start?: number;
   limit?: number;
   size?: number;
+  _links?: { next?: string };
 }
 
 interface ConfluenceV2Comment {
@@ -766,8 +774,11 @@ function mapV1Comment(raw: ConfluenceV1Comment, pageId: string): PageComment {
     pageId,
     location: raw.extensions?.location === 'inline' ? 'inline' : 'footer',
     parentId: parent,
-    author: raw.version?.by?.displayName ?? raw.version?.by?.accountId ?? 'Unknown',
-    createdAt: raw.version?.when ?? '',
+    // Prefer `history` (the comment's original author/creation) over `version`
+    // (the last edit), falling back to `version` for older responses that lack it.
+    author: raw.history?.createdBy?.displayName ?? raw.history?.createdBy?.accountId
+      ?? raw.version?.by?.displayName ?? raw.version?.by?.accountId ?? 'Unknown',
+    createdAt: raw.history?.createdDate ?? raw.version?.when ?? '',
     body: parseAdfValue(raw.body?.atlas_doc_format?.value),
     resolutionStatus: raw.extensions?.resolution?.status as PageComment['resolutionStatus'],
     inlineSelection: raw.extensions?.inlineProperties?.originalSelection,
