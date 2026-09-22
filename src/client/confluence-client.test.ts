@@ -49,3 +49,65 @@ describe('ConfluenceRestClient labels', () => {
     expect(options.method).toBe('DELETE');
   });
 });
+
+// #19: CQL failures must surface a CQL diagnostic, not a JS TypeError.
+describe('ConfluenceRestClient searchByCql errors', () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const client = new ConfluenceRestClient({
+    host: 'https://example.atlassian.net',
+    email: 'user@example.com',
+    apiToken: 'token',
+  });
+
+  it('surfaces the message from a 400 error body', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      statusCode: 400,
+      message: 'Could not parse cql : type = bogus',
+    }), { status: 400 }));
+    await expect(client.searchByCql('type = bogus')).rejects.toThrow(
+      'Invalid CQL: Could not parse cql : type = bogus. CQL: type = bogus',
+    );
+  });
+
+  it('keeps a non-JSON 400 body verbatim', async () => {
+    fetchMock.mockResolvedValue(new Response('bad query', { status: 400 }));
+    await expect(client.searchByCql('type = bogus')).rejects.toThrow('Invalid CQL: bad query');
+  });
+
+  it('passes non-400 errors through unchanged', async () => {
+    fetchMock.mockResolvedValue(new Response('{"message":"nope"}', { status: 403 }));
+    await expect(client.searchByCql('type = page')).rejects.toThrow('Confluence API error 403');
+  });
+
+  it('explains non-content-only results instead of dereferencing undefined', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      results: [{ space: { key: 'ABC' }, entityType: 'space', title: 'ABC' }],
+      totalSize: 1,
+    }), { status: 200 }));
+    await expect(client.searchByCql('type = space AND space.type = "personal"')).rejects.toThrow(
+      /CQL matched only space results; search_confluence returns content only/,
+    );
+  });
+
+  it('drops non-content hits mixed in with content hits', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      results: [
+        { space: { key: 'ABC' }, entityType: 'space' },
+        { content: { id: '42', title: 'Page', type: 'page', status: 'current' }, entityType: 'content' },
+      ],
+      totalSize: 2,
+    }), { status: 200 }));
+    const result = await client.searchByCql('text ~ "abc"');
+    expect(result.results.map(r => r.content.id)).toEqual(['42']);
+  });
+});

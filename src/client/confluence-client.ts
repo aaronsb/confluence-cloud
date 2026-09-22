@@ -268,11 +268,29 @@ export class ConfluenceRestClient implements ConfluenceClient {
     if (options?.cursor) params.set('cursor', options.cursor);
     if (options?.limit) params.set('limit', String(options.limit));
     if (options?.cqlcontext) params.set('cqlcontext', JSON.stringify(options.cqlcontext));
-    const raw = await this.requestV1<ConfluenceV1SearchResponse>(
-      `/search?${params.toString()}`
+    let raw: ConfluenceV1SearchResponse;
+    try {
+      raw = await this.requestV1<ConfluenceV1SearchResponse>(
+        `/search?${params.toString()}`
+      );
+    } catch (error) {
+      throw cqlError(error, cql);
+    }
+    const all = raw.results ?? [];
+    // v1 search also returns non-content entities (spaces, users) with no
+    // `content` object — e.g. `type = space`. Only content hits are mappable.
+    const contentHits = all.filter(
+      (r): r is typeof r & { content: ConfluenceV1Content } => r.content !== undefined,
     );
+    if (all.length > 0 && contentHits.length === 0) {
+      const kinds = [...new Set(all.map(r => r.entityType ?? 'non-content'))].join(', ');
+      throw new Error(
+        `CQL matched only ${kinds} results; search_confluence returns content only ` +
+        `(type = page, blogpost, comment, attachment). Use manage_confluence_space for spaces. CQL: ${cql}`,
+      );
+    }
     return {
-      results: (raw.results ?? []).map(r => ({
+      results: contentHits.map(r => ({
         content: mapV1Content(r.content),
         excerpt: r.excerpt,
         lastModified: r.lastModified ?? '',
@@ -591,7 +609,8 @@ interface ConfluenceV2PaginatedResponse<T = ConfluenceV2Page> {
 // v1 search response has different content shape
 interface ConfluenceV1SearchResponse {
   results: Array<{
-    content: ConfluenceV1Content;
+    content?: ConfluenceV1Content;
+    entityType?: string;
     excerpt?: string;
     lastModified?: string;
     url?: string;
@@ -686,6 +705,22 @@ function mapContentProperty(raw: ConfluenceV2ContentProperty): ContentProperty {
     value: raw.value,
     version: { number: raw.version?.number ?? 1, createdAt: raw.version?.createdAt },
   };
+}
+
+/**
+ * Rewrap a failed CQL search so the caller sees Confluence's own diagnostic
+ * (the `message` field of the error body) rather than a raw JSON dump.
+ */
+function cqlError(error: unknown, cql: string): Error {
+  const text = error instanceof Error ? error.message : String(error);
+  const match = /^Confluence API error 400: ([\s\S]*)$/.exec(text);
+  if (!match) return error instanceof Error ? error : new Error(text);
+  let detail = match[1];
+  try {
+    const body = JSON.parse(match[1]) as { message?: string };
+    if (body.message) detail = body.message;
+  } catch { /* non-JSON body — use it verbatim */ }
+  return new Error(`Invalid CQL: ${detail}. CQL: ${cql}`);
 }
 
 function extractCursor(nextLink: string): string | undefined {
