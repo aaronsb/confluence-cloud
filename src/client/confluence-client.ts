@@ -282,12 +282,17 @@ export class ConfluenceRestClient implements ConfluenceClient {
     const contentHits = all.filter(
       (r): r is typeof r & { content: ConfluenceV1Content } => r.content !== undefined,
     );
-    if (all.length > 0 && contentHits.length === 0) {
+    const omittedNonContent = all.length - contentHits.length;
+    const hasNext = raw._links?.next !== undefined;
+    const totalSize = raw.totalSize ?? all.length;
+    // Only declare the whole search a non-content match when this page is the
+    // last one and it's entirely non-content. A page that's non-content-only
+    // but has more pages behind it (or a totalSize larger than what we've
+    // seen) may still turn up content further on — return it with its cursor
+    // instead of guessing.
+    if (contentHits.length === 0 && all.length > 0 && !hasNext && totalSize <= all.length) {
       const kinds = [...new Set(all.map(r => r.entityType ?? 'non-content'))].join(', ');
-      throw new Error(
-        `CQL matched only ${kinds} results; search_confluence returns content only ` +
-        `(type = page, blogpost, comment, attachment). Use manage_confluence_space for spaces. CQL: ${cql}`,
-      );
+      throw new Error(`CQL matched only ${kinds} results; no content in this result set. CQL: ${cql}`);
     }
     return {
       results: contentHits.map(r => ({
@@ -298,6 +303,7 @@ export class ConfluenceRestClient implements ConfluenceClient {
       })),
       totalSize: raw.totalSize ?? 0,
       cursor: raw._links?.next ? extractCursor(raw._links.next) : undefined,
+      omittedNonContent,
     };
   }
 
@@ -718,7 +724,10 @@ function cqlError(error: unknown, cql: string): Error {
   let detail = match[1];
   try {
     const body = JSON.parse(match[1]) as { message?: string };
-    if (body.message) detail = body.message;
+    // Confluence's own diagnostic is often prefixed with the fully-qualified
+    // Java exception class (e.g. `com.atlassian...BadRequestException: `) —
+    // strip it so the caller sees the human-readable part only.
+    if (body.message) detail = body.message.replace(/^(?:[\w$]+\.)+[\w$]*Exception:\s*/, '');
   } catch { /* non-JSON body — use it verbatim */ }
   return new Error(`Invalid CQL: ${detail}. CQL: ${cql}`);
 }

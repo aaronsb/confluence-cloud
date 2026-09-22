@@ -158,6 +158,38 @@ describe('renderSearchResults', () => {
     const text = renderSearchResults(results);
     expect(text).toContain('cursor: "abc123"');
   });
+
+  it('should note omitted non-content hits when present', () => {
+    const results: SearchResult = {
+      totalSize: 40,
+      results: [
+        {
+          content: makePage({ id: '10', title: 'Result One' }),
+          lastModified: '2026-03-10',
+          url: '/wiki/spaces/TEST/pages/10',
+        },
+      ],
+      omittedNonContent: 2,
+    };
+    const text = renderSearchResults(results);
+    expect(text).toContain('Showing 1 content items (2 space/user hits omitted)');
+  });
+
+  it('should not mention omitted hits when there are none', () => {
+    const results: SearchResult = {
+      totalSize: 1,
+      results: [
+        {
+          content: makePage({ id: '10', title: 'Result One' }),
+          lastModified: '2026-03-10',
+          url: '/wiki/spaces/TEST/pages/10',
+        },
+      ],
+      omittedNonContent: 0,
+    };
+    const text = renderSearchResults(results);
+    expect(text).not.toContain('omitted');
+  });
 });
 
 describe('renderAttachmentList', () => {
