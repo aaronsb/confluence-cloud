@@ -5,9 +5,9 @@
 import type { ConfluenceClient } from '../client/confluence-client.js';
 import { escapeCql } from '../client/cql-utils.js';
 import { parseAdf, type AdfNode } from '../content/adf-parser.js';
-import { renderBlocks, renderBlocksForScratchpad } from '../content/renderer.js';
-import { parseDirectives } from '../content/directive-parser.js';
 import { serializeBlocks } from '../content/adf-serializer.js';
+import { parseDirectives } from '../content/directive-parser.js';
+import { renderBlocks, renderBlocksForScratchpad } from '../content/renderer.js';
 import { renderPage, renderComments, type RenderedComment } from '../rendering/markdown-renderer.js';
 import { getNextSteps } from '../rendering/next-steps.js';
 import type { ScratchpadManager } from '../sessions/scratchpad.js';
