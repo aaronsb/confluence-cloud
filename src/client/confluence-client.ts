@@ -11,11 +11,17 @@ import type {
   SearchResult,
   Attachment,
   ContentProperty,
+  PageComment,
   PaginationOptions,
   PaginatedResponse,
 } from '../types/index.js';
 
 // ── REST v2 Implementation ─────────────────────────────────────
+
+/** In-flight cap for per-comment fan-out calls (children, versions), to stay clear of 429s. */
+const COMMENT_FANOUT = 5;
+/** `POST /users-bulk` rejects more than 250 account ids per call. */
+const USERS_BULK_LIMIT = 250;
 
 
 // ── Client Interface ───────────────────────────────────────────
@@ -56,6 +62,11 @@ export interface ConfluenceClient {
   getProperty(pageId: string, key: string): Promise<ContentProperty>;
   setProperty(pageId: string, key: string, value: Record<string, unknown>): Promise<ContentProperty>;
   deleteProperty(pageId: string, key: string): Promise<void>;
+
+  // Comments
+  getComments(pageId: string): Promise<PageComment[]>;
+  getCommentLocation(commentId: string): Promise<{ location: 'footer' | 'inline'; pageId?: string } | undefined>;
+  addComment(pageId: string, body: object, options?: { parentCommentId?: string; location?: 'footer' | 'inline' }): Promise<PageComment>;
 
   // Move / Copy
   movePage(id: string, parentId: string): Promise<Page>;
@@ -409,6 +420,148 @@ export class ConfluenceRestClient implements ConfluenceClient {
     await this.requestV1(`/content/${pageId}/label?name=${encodeURIComponent(label)}`, { method: 'DELETE' });
   }
 
+  // ── Comments ───────────────────────────────────────────────
+
+  // Comment reads and writes both use v2 (ADR-503). The v1 `/content/{id}/child/comment`
+  // endpoint answered in one call but is deprecated (CHANGE-864, removal date passed).
+  // v2 costs more round trips: one list per location, one `children` call per comment
+  // (replies can nest), one `versions/1` call per edited comment for the original
+  // author and date, and one `users-bulk` call per 250 distinct authors for names.
+  async getComments(pageId: string): Promise<PageComment[]> {
+    const raws: Array<{ raw: ConfluenceV2Comment; location: CommentLocation }> = [];
+    for (const location of ['footer', 'inline'] as const) {
+      const top = await this.listAllV2<ConfluenceV2Comment>(
+        `/pages/${pageId}/${location}-comments`, { 'body-format': 'atlas_doc_format' },
+      );
+      raws.push(...top.map(raw => ({ raw, location })));
+    }
+
+    // Walk reply threads breadth-first; replies inherit their root's location. A failed
+    // `children` call is fatal, because a silently dropped thread misrepresents the
+    // discussion; the error names the comment whose `children` call failed.
+    const seen = new Set(raws.map(r => r.raw.id));
+    let frontier = raws;
+    while (frontier.length > 0) {
+      const batches = await mapWithConcurrency(frontier, COMMENT_FANOUT, ({ raw, location }) =>
+        this.listAllV2<ConfluenceV2Comment>(
+          `/${location}-comments/${raw.id}/children`, { 'body-format': 'atlas_doc_format' },
+        ).then(
+          children => children.map(child => ({ raw: child, location })),
+          error => {
+            throw new Error(`Failed to fetch children of comment ${raw.id}: ${error instanceof Error ? error.message : error}`);
+          },
+        ),
+      );
+      frontier = batches.flat().filter(c => !seen.has(c.raw.id));
+      for (const c of frontier) seen.add(c.raw.id);
+      raws.push(...frontier);
+    }
+
+    // `version` on a comment is its latest edit. For edited comments, fetch version 1
+    // so the author and date are the original poster's, not the last editor's. A failed
+    // lookup falls back to the last editor's author and date, same as a `users-bulk`
+    // failure falls back to account ids: the main content is already in hand.
+    const originals = new Map<string, ConfluenceV2Version>();
+    const edited = raws.filter(r => (r.raw.version?.number ?? 1) > 1);
+    await mapWithConcurrency(edited, COMMENT_FANOUT, async ({ raw, location }) => {
+      try {
+        originals.set(raw.id, await this.request<ConfluenceV2Version>(`/${location}-comments/${raw.id}/versions/1`));
+      } catch (error) {
+        console.error(`[confluence-cloud] versions/1 failed for comment ${raw.id}; showing last editor. ${error instanceof Error ? error.message : error}`);
+      }
+    });
+
+    const comments = raws.map(({ raw, location }) => {
+      const original = originals.get(raw.id);
+      const comment = mapV2Comment(raw, location);
+      if (original) {
+        comment.author = original.authorId ?? comment.author;
+        comment.createdAt = original.createdAt ?? comment.createdAt;
+      }
+      if (!comment.pageId) comment.pageId = pageId;
+      return comment;
+    });
+
+    const names = await this.resolveDisplayNames(comments.map(c => c.author));
+    for (const c of comments) c.author = names.get(c.author) ?? (c.author || 'Unknown');
+    return comments;
+  }
+
+  /**
+   * Look up a single comment's location and page without reading the whole comment
+   * tree. Tries `footer-comments/{id}` first; only on a 404 does it try
+   * `inline-comments/{id}`, since a footer comment 404s there. Any other error
+   * propagates. Returns `undefined` if the id is neither.
+   */
+  async getCommentLocation(commentId: string): Promise<{ location: CommentLocation; pageId?: string } | undefined> {
+    for (const location of ['footer', 'inline'] as const) {
+      try {
+        const raw = await this.request<ConfluenceV2Comment>(`/${location}-comments/${commentId}`);
+        return { location, pageId: raw.pageId };
+      } catch (error) {
+        if (!(error instanceof Error && error.message.includes('error 404'))) throw error;
+      }
+    }
+    return undefined;
+  }
+
+  /** Follow a v2 list endpoint's `_links.next` cursor until exhausted. */
+  private async listAllV2<T>(path: string, params: Record<string, string> = {}): Promise<T[]> {
+    const all: T[] = [];
+    let cursor: string | undefined;
+    do {
+      const qs = new URLSearchParams({ ...params, limit: '100', ...(cursor ? { cursor } : {}) });
+      const raw = await this.request<ConfluenceV2PaginatedResponse<T>>(`${path}?${qs}`);
+      // An empty page ends the walk even if `next` is set, so a misbehaving
+      // cursor cannot loop forever.
+      if (raw.results.length === 0) break;
+      all.push(...raw.results);
+      cursor = raw._links?.next ? extractCursor(raw._links.next) : undefined;
+    } while (cursor);
+    return all;
+  }
+
+  /**
+   * Map account ids to display names via `users-bulk` (250 ids per call). A lookup
+   * failure degrades to showing account ids rather than failing the whole read.
+   */
+  private async resolveDisplayNames(accountIds: string[]): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    const unique = [...new Set(accountIds.filter(Boolean))];
+    for (let i = 0; i < unique.length; i += USERS_BULK_LIMIT) {
+      try {
+        const raw = await this.request<{ results: Array<{ accountId: string; displayName?: string; publicName?: string }> }>(
+          '/users-bulk',
+          { method: 'POST', body: JSON.stringify({ accountIds: unique.slice(i, i + USERS_BULK_LIMIT) }) },
+        );
+        for (const u of raw.results ?? []) {
+          const name = u.displayName ?? u.publicName;
+          if (name) names.set(u.accountId, name);
+        }
+      } catch (error) {
+        console.error(`[confluence-cloud] users-bulk lookup failed; showing account ids. ${error instanceof Error ? error.message : error}`);
+      }
+    }
+    return names;
+  }
+
+  async addComment(
+    pageId: string,
+    body: object,
+    options?: { parentCommentId?: string; location?: 'footer' | 'inline' },
+  ): Promise<PageComment> {
+    const location = options?.location ?? 'footer';
+    const raw = await this.request<ConfluenceV2Comment>(`/${location}-comments`, {
+      method: 'POST',
+      body: JSON.stringify({
+        pageId,
+        ...(options?.parentCommentId ? { parentCommentId: options.parentCommentId } : {}),
+        body: { representation: 'atlas_doc_format', value: JSON.stringify(body) },
+      }),
+    });
+    return mapV2Comment(raw, location);
+  }
+
   // ── Content Properties ──────────────────────────────────────
 
   async getProperties(pageId: string): Promise<ContentProperty[]> {
@@ -607,6 +760,27 @@ interface ConfluenceV2ContentProperty {
   version?: { number: number; createdAt?: string };
 }
 
+type CommentLocation = 'footer' | 'inline';
+
+interface ConfluenceV2Comment {
+  id: string;
+  pageId?: string;
+  parentCommentId?: string;
+  body?: { atlas_doc_format?: { value: string } };
+  version?: ConfluenceV2Version;
+  resolutionStatus?: string;
+  properties?: {
+    inlineOriginalSelection?: string;
+    'inline-original-selection'?: string;
+  };
+}
+
+interface ConfluenceV2Version {
+  number?: number;
+  createdAt?: string;
+  authorId?: string;
+}
+
 interface ConfluenceV2PaginatedResponse<T = ConfluenceV2Page> {
   results: T[];
   _links?: { next?: string };
@@ -705,6 +879,29 @@ function mapV1Content(raw: ConfluenceV1Content): Page {
   };
 }
 
+function parseAdfValue(value: string | undefined): PageComment['body'] {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function mapV2Comment(raw: ConfluenceV2Comment, location: CommentLocation): PageComment {
+  return {
+    id: raw.id,
+    pageId: raw.pageId ?? '',
+    location,
+    parentId: raw.parentCommentId,
+    author: raw.version?.authorId ?? '',
+    createdAt: raw.version?.createdAt ?? '',
+    body: parseAdfValue(raw.body?.atlas_doc_format?.value),
+    resolutionStatus: raw.resolutionStatus as PageComment['resolutionStatus'],
+    inlineSelection: raw.properties?.inlineOriginalSelection ?? raw.properties?.['inline-original-selection'],
+  };
+}
+
 function mapContentProperty(raw: ConfluenceV2ContentProperty): ContentProperty {
   return {
     key: raw.key,
@@ -730,6 +927,20 @@ function cqlError(error: unknown, cql: string): Error {
     if (body.message) detail = body.message.replace(/^(?:[\w$]+\.)+[\w$]*Exception:\s*/, '');
   } catch { /* non-JSON body — use it verbatim */ }
   return new Error(`Invalid CQL: ${detail}. CQL: ${cql}`);
+}
+
+/** Run `fn` over `items` with at most `limit` calls in flight, preserving order. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 function extractCursor(nextLink: string): string | undefined {
